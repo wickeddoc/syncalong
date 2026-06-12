@@ -1,0 +1,212 @@
+"""
+Align lyrics to Whisper transcript using dynamic-programming sequence alignment.
+
+The algorithm is a variant of the Needleman–Wunsch / Smith–Waterman family:
+both the lyric word sequence and the transcript word sequence are in temporal
+order, so we find a monotonic mapping that maximises the total fuzzy-match
+score between paired words.
+
+Complexity is O(N·M) where N = lyric words, M = transcript words.  For a
+typical song (< 600 words each) this takes a few milliseconds.
+"""
+
+from __future__ import annotations
+
+from syncalong.lyrics import LyricLine
+from syncalong.transcribe import WordTimestamp
+
+
+# ---------------------------------------------------------------------------
+# Fuzzy word similarity
+# ---------------------------------------------------------------------------
+
+def _word_score(a: str, b: str) -> float:
+    """
+    Return a 0–100 similarity score between two normalised words.
+
+    Uses rapidfuzz for speed; falls back to difflib if unavailable.
+    """
+    if a == b:
+        return 100.0
+    try:
+        from rapidfuzz.fuzz import ratio
+        return ratio(a, b)
+    except ImportError:
+        from difflib import SequenceMatcher
+        return SequenceMatcher(None, a, b).ratio() * 100.0
+
+
+# ---------------------------------------------------------------------------
+# DP alignment
+# ---------------------------------------------------------------------------
+
+def _dp_align(
+    lyric_words: list[str],
+    transcript_words: list[WordTimestamp],
+    threshold: float,
+) -> dict[int, int]:
+    """
+    Find the best monotonic alignment of *lyric_words* → *transcript_words*.
+
+    Returns a mapping ``{lyric_word_index: transcript_word_index}`` for
+    every lyric word that matched above *threshold*.
+
+    We define:
+        dp[i][j] = best cumulative score aligning lyric[:i] to transcript[:j]
+
+    Transitions:
+        - skip transcript word j  → dp[i][j-1]
+        - skip lyric word i       → dp[i-1][j]   (with a small penalty)
+        - match i↔j               → dp[i-1][j-1] + score(i,j)  if score ≥ threshold
+    """
+    n = len(lyric_words)
+    m = len(transcript_words)
+
+    if n == 0 or m == 0:
+        return {}
+
+    SKIP_LYRIC_PENALTY = -1.0  # Small penalty for skipping a lyric word
+
+    # Use flat arrays for speed
+    # dp[i*(m+1) + j]
+    size = (n + 1) * (m + 1)
+    dp = [0.0] * size
+    # trace: 0 = none, 1 = skip transcript, 2 = skip lyric, 3 = match
+    trace = [0] * size
+
+    def idx(i: int, j: int) -> int:
+        return i * (m + 1) + j
+
+    for i in range(1, n + 1):
+        # Applying skip-lyric penalty cumulatively
+        dp[idx(i, 0)] = dp[idx(i - 1, 0)] + SKIP_LYRIC_PENALTY
+        trace[idx(i, 0)] = 2
+
+    for i in range(1, n + 1):
+        lw = lyric_words[i - 1]
+        for j in range(1, m + 1):
+            tw = transcript_words[j - 1].word
+            best = dp[idx(i, j - 1)]       # skip transcript word
+            best_t = 1
+
+            val = dp[idx(i - 1, j)] + SKIP_LYRIC_PENALTY
+            if val > best:
+                best = val
+                best_t = 2
+
+            score = _word_score(lw, tw)
+            if score >= threshold:
+                val = dp[idx(i - 1, j - 1)] + score
+                if val > best:
+                    best = val
+                    best_t = 3
+
+            dp[idx(i, j)] = best
+            trace[idx(i, j)] = best_t
+
+    # Traceback
+    mapping: dict[int, int] = {}
+    i, j = n, m
+    while i > 0 and j > 0:
+        t = trace[idx(i, j)]
+        if t == 3:
+            mapping[i - 1] = j - 1  # 0-based
+            i -= 1
+            j -= 1
+        elif t == 2:
+            i -= 1
+        else:
+            j -= 1
+
+    # Handle remaining lyric words (all skipped)
+    # i might still be > 0 but they have no match — that's fine.
+
+    return mapping
+
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
+
+def align_lyrics_to_transcript(
+    lyric_lines: list[LyricLine],
+    transcript: list[WordTimestamp],
+    *,
+    threshold: float = 55.0,
+) -> list[tuple[LyricLine, float | None]]:
+    """
+    Align parsed lyrics to a word-level transcript.
+
+    Parameters
+    ----------
+    lyric_lines : list[LyricLine]
+        Parsed lyrics (from ``parse_lyrics``).
+    transcript : list[WordTimestamp]
+        Word timestamps (from ``transcribe_audio``).
+    threshold : float
+        Minimum fuzzy score (0–100) to accept a match.
+
+    Returns
+    -------
+    list of (LyricLine, timestamp_or_None)
+        One entry per lyric line.  The timestamp (seconds) is the start time
+        of the first matched word in that line, or ``None`` if no word in
+        the line could be aligned.
+    """
+    # Flatten all lyric words into a single ordered list, keeping a back-
+    # reference so we can map results back to lines.
+    flat_words: list[str] = []
+    word_to_line: list[int] = []      # flat index → index into lyric_lines
+
+    for li, line in enumerate(lyric_lines):
+        for w in line.words:
+            flat_words.append(w)
+            word_to_line.append(li)
+
+    # Run DP alignment
+    mapping = _dp_align(flat_words, transcript, threshold)
+
+    # For each lyric line, find the earliest matched word's timestamp
+    line_timestamps: dict[int, float] = {}
+    for flat_idx, trans_idx in sorted(mapping.items()):
+        li = word_to_line[flat_idx]
+        ts = transcript[trans_idx].start
+        if li not in line_timestamps:
+            line_timestamps[li] = ts
+
+    # Interpolate timestamps for unmatched non-blank lines that sit between
+    # two matched lines — gives a rough estimate rather than leaving gaps.
+    matched_indices = sorted(line_timestamps.keys())
+    if matched_indices:
+        _interpolate_gaps(lyric_lines, line_timestamps, matched_indices)
+
+    return [
+        (line, line_timestamps.get(i))
+        for i, line in enumerate(lyric_lines)
+    ]
+
+
+def _interpolate_gaps(
+    lines: list[LyricLine],
+    timestamps: dict[int, float],
+    matched: list[int],
+) -> None:
+    """Fill small gaps between matched lines with linearly interpolated times."""
+    for k in range(len(matched) - 1):
+        start_li = matched[k]
+        end_li = matched[k + 1]
+        gap = end_li - start_li
+
+        if gap <= 1:
+            continue  # Adjacent — nothing to interpolate
+
+        t_start = timestamps[start_li]
+        t_end = timestamps[end_li]
+
+        for offset in range(1, gap):
+            li = start_li + offset
+            if lines[li].is_blank or not lines[li].words:
+                continue
+            # Linear interpolation
+            frac = offset / gap
+            timestamps[li] = t_start + frac * (t_end - t_start)

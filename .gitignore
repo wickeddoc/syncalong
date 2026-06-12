@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+build/
+dist/
+
+# Environments / editors
+.venv
+.idea/
+.claude/settings.local.json
+
+# Local audio fixtures — copyrighted recordings and lyrics, never publish
+test/

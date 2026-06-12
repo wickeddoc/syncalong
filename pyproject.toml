@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "syncalong"
+version = "0.1.0"
+description = "CLI tool to timestamp lyrics by aligning them against an audio file"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "openai-whisper>=20231117",
+    "rapidfuzz>=3.0",
+]
+
+[project.optional-dependencies]
+vocal-separation = ["demucs>=4.0"]
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+syncalong = "syncalong.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
