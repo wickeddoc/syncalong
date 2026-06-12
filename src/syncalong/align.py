@@ -12,6 +12,8 @@ typical song (< 600 words each) this takes a few milliseconds.
 
 from __future__ import annotations
 
+from functools import lru_cache
+
 from syncalong.lyrics import LyricLine
 from syncalong.transcribe import WordTimestamp
 
@@ -20,20 +22,30 @@ from syncalong.transcribe import WordTimestamp
 # Fuzzy word similarity
 # ---------------------------------------------------------------------------
 
+try:
+    from rapidfuzz.fuzz import ratio as _rf_ratio
+
+    def _ratio(a: str, b: str) -> float:
+        return _rf_ratio(a, b)
+except ImportError:
+    from difflib import SequenceMatcher
+
+    def _ratio(a: str, b: str) -> float:
+        return SequenceMatcher(None, a, b).ratio() * 100.0
+
+
+@lru_cache(maxsize=None)
 def _word_score(a: str, b: str) -> float:
     """
     Return a 0–100 similarity score between two normalised words.
 
     Uses rapidfuzz for speed; falls back to difflib if unavailable.
+    Cached: the DP loop scores every lyric×transcript word pair, and song
+    vocabularies repeat heavily, so most pairs recur thousands of times.
     """
     if a == b:
         return 100.0
-    try:
-        from rapidfuzz.fuzz import ratio
-        return ratio(a, b)
-    except ImportError:
-        from difflib import SequenceMatcher
-        return SequenceMatcher(None, a, b).ratio() * 100.0
+    return _ratio(a, b)
 
 
 # ---------------------------------------------------------------------------
@@ -179,6 +191,13 @@ def align_lyrics_to_transcript(
     matched_indices = sorted(line_timestamps.keys())
     if matched_indices:
         _interpolate_gaps(lyric_lines, line_timestamps, matched_indices)
+        _extrapolate_edges(
+            lyric_lines,
+            line_timestamps,
+            matched_indices,
+            t_min=transcript[0].start,
+            t_max=transcript[-1].end,
+        )
 
     return [
         (line, line_timestamps.get(i))
@@ -210,3 +229,37 @@ def _interpolate_gaps(
             # Linear interpolation
             frac = offset / gap
             timestamps[li] = t_start + frac * (t_end - t_start)
+
+
+def _extrapolate_edges(
+    lines: list[LyricLine],
+    timestamps: dict[int, float],
+    matched: list[int],
+    *,
+    t_min: float,
+    t_max: float,
+) -> None:
+    """
+    Estimate timestamps for unmatched lines before the first matched line
+    and after the last one, so no sung line is left untagged (untagged
+    lines are dropped by many LRC players).
+
+    Treats the transcript's start and end as virtual anchors at line
+    index -1 and ``len(lines)`` and interpolates linearly, mirroring the
+    scheme used for interior gaps.
+    """
+    first, last = matched[0], matched[-1]
+
+    gap = first - (-1)
+    for li in range(first):
+        if lines[li].is_blank or not lines[li].words:
+            continue
+        frac = (li + 1) / gap
+        timestamps[li] = t_min + frac * (timestamps[first] - t_min)
+
+    gap = len(lines) - last
+    for li in range(last + 1, len(lines)):
+        if lines[li].is_blank or not lines[li].words:
+            continue
+        frac = (li - last) / gap
+        timestamps[li] = timestamps[last] + frac * (t_max - timestamps[last])

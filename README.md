@@ -77,7 +77,7 @@ syncalong lied.txt lied.mp3 -l de
 
 | Flag | Description | Default |
 |---|---|---|
-| `-m, --model` | Whisper model size (`tiny`, `base`, `small`, `medium`, `large`) | `base` |
+| `-m, --model` | Whisper model: `tiny`, `base`, `small`, `medium`, `large`, `turbo`, or variants like `small.en` (English-only) and `large-v3`. | `base` |
 | `-l, --language` | Language code (e.g. `en`, `de`, `ja`). Auto-detected if omitted. | auto |
 | `--separate-vocals` | Run Demucs to isolate vocals before transcription. | off |
 | `--no-lyrics-prompt` | Don't feed the lyrics to Whisper as a decoding prompt. | off |
@@ -126,7 +126,9 @@ Standard LRC with `[mm:ss.xx]` timestamps:
 
 4. **Map to lines** — Each lyric line receives the timestamp of its earliest
    matched word. Small gaps between matched lines are filled with linear
-   interpolation.
+   interpolation, and unmatched lines before the first match or after the
+   last one are extrapolated from the transcript's start and end times, so
+   every sung line gets a tag.
 
 5. **Format** — The timed lines are printed in LRC format to stdout.
 
@@ -134,7 +136,9 @@ Standard LRC with `[mm:ss.xx]` timestamps:
 
 - **Use `--separate-vocals`** on any track with significant instrumentation.
 - **Bump up the model size** (`-m small` or `-m medium`) if alignment is poor.
-  The `large` model is the most accurate but is slow without a GPU.
+  For English songs the `.en` variants (`-m small.en`) are often more
+  accurate at the same speed. The `large` model is the most accurate but is
+  slow without a GPU; `turbo` is a good speed/quality compromise.
 - **Check your lyrics** — extra or missing words relative to the actual
   performance will reduce alignment quality. The closer the lyrics match
   what's actually sung, the better.

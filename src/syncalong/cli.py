@@ -34,8 +34,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-m", "--model",
         default="base",
-        choices=["tiny", "base", "small", "medium", "large"],
-        help="Whisper model size. Larger = more accurate but slower. (default: base)",
+        metavar="MODEL",
+        help=(
+            "Whisper model name: tiny, base, small, medium, large, turbo, "
+            "or a variant like small.en (English-only, often more accurate "
+            "for English) or large-v3. Larger = more accurate but slower. "
+            "(default: base)"
+        ),
     )
     parser.add_argument(
         "-l", "--language",

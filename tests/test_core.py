@@ -74,6 +74,15 @@ class TestParseLyrics:
     def test_normalize_strips_accents_and_case(self):
         assert normalize("Café déjà") == "cafe deja"
 
+    def test_normalize_splits_hyphenated_words(self):
+        # Whisper emits "deja vu" as two words — hyphens must become
+        # word boundaries, not be deleted.
+        assert normalize("déjà-vu") == "deja vu"
+
+    def test_normalize_keeps_contractions_joined(self):
+        assert normalize("don't") == "dont"
+        assert normalize("don’t") == "dont"  # curly apostrophe
+
     def test_punctuation_stripping(self):
         path = _make_lyrics_file("Don't stop, believin'!\n")
         lines = parse_lyrics(path)
@@ -123,6 +132,13 @@ class TestTranscribeOptions:
         opts = _build_transcribe_options(language="de", initial_prompt="Hallo Welt")
         assert opts["language"] == "de"
         assert opts["initial_prompt"] == "Hallo Welt"
+
+    def test_parser_accepts_all_whisper_model_names(self):
+        from syncalong.cli import build_parser
+        parser = build_parser()
+        for model in ["turbo", "small.en", "large-v3", "base"]:
+            args = parser.parse_args(["l.txt", "a.mp3", "-m", model])
+            assert args.model == model
 
     def test_cli_flag_disables_lyrics_prompt(self):
         from syncalong.cli import build_parser
@@ -225,6 +241,38 @@ class TestAlignLyricsToTranscript:
         result = align_lyrics_to_transcript(lines, transcript)
         assert result[1][1] == pytest.approx(5.0)  # midpoint of 0.0 and 10.0
 
+    def test_lines_before_first_match_are_extrapolated(self):
+        path = _make_lyrics_file("xylophone zebra\nhello world\n")
+        lines = parse_lyrics(path)
+        transcript = _make_transcript([
+            # Unmatched audio before the first matched lyric line
+            ("blah", 2.0, 2.5),
+            ("hello", 6.0, 6.5), ("world", 7.0, 7.5),
+        ])
+        result = align_lyrics_to_transcript(lines, transcript)
+        # Halfway between transcript start (2.0) and the first anchor (6.0)
+        assert result[0][1] == pytest.approx(4.0)
+        assert result[1][1] == 6.0
+
+    def test_lines_after_last_match_are_extrapolated(self):
+        path = _make_lyrics_file("hello world\nxylophone zebra\n")
+        lines = parse_lyrics(path)
+        transcript = _make_transcript([
+            ("hello", 1.0, 1.5), ("world", 2.0, 2.5),
+            ("blah", 9.5, 10.0),
+        ])
+        result = align_lyrics_to_transcript(lines, transcript)
+        assert result[0][1] == 1.0
+        # Halfway between the last anchor (1.0) and transcript end (10.0)
+        assert result[1][1] == pytest.approx(5.5)
+
+    def test_no_matches_at_all_leaves_all_lines_untimed(self):
+        path = _make_lyrics_file("xylophone zebra\n")
+        lines = parse_lyrics(path)
+        transcript = _make_transcript([("blah", 1.0, 1.5)])
+        result = align_lyrics_to_transcript(lines, transcript)
+        assert result[0][1] is None
+
     def test_simple_two_lines(self):
         path = _make_lyrics_file("hello world\ngoodbye moon\n")
         lines = parse_lyrics(path)
@@ -238,6 +286,64 @@ class TestAlignLyricsToTranscript:
         assert len(result) == 2
         assert result[0][1] == 1.0   # First line starts at "hello"
         assert result[1][1] == 4.0   # Second line starts at "goodbye"
+
+
+# ---------------------------------------------------------------------------
+# Vocal separation (demucs faked — real runs need the optional extra)
+# ---------------------------------------------------------------------------
+
+class TestVocalSeparator:
+    def _fake_run(self, returncode=0, make_vocals=True):
+        import subprocess
+
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            if make_vocals:
+                outdir = Path(cmd[cmd.index("-o") + 1])
+                stem_dir = outdir / "htdemucs" / "song"
+                stem_dir.mkdir(parents=True)
+                (stem_dir / "vocals.wav").write_bytes(b"")
+            return subprocess.CompletedProcess(cmd, returncode)
+
+        return fake_run, calls
+
+    def test_returns_vocals_path_and_registers_cleanup(self, monkeypatch):
+        from syncalong import vocal_separator as vs
+
+        registered = []
+        monkeypatch.setattr(
+            vs.atexit, "register",
+            lambda fn, *a, **kw: registered.append((fn, a, kw)),
+        )
+        fake_run, calls = self._fake_run()
+        monkeypatch.setattr(vs.subprocess, "run", fake_run)
+
+        vocals = vs.separate(Path("song.mp3"))
+        assert vocals.name == "vocals.wav"
+        assert vocals.is_file()
+
+        # Demucs output must not pollute stdout (reserved for LRC), and
+        # must not be captured (progress should stream to the user).
+        _, kwargs = calls[0]
+        assert not kwargs.get("capture_output")
+
+        # The registered cleanup removes the temp dir
+        assert registered
+        for fn, a, kw in registered:
+            fn(*a, **kw)
+        assert not vocals.exists()
+
+    def test_raises_on_demucs_failure(self, monkeypatch):
+        from syncalong import vocal_separator as vs
+
+        monkeypatch.setattr(vs.atexit, "register", lambda *a, **kw: None)
+        fake_run, _ = self._fake_run(returncode=1, make_vocals=False)
+        monkeypatch.setattr(vs.subprocess, "run", fake_run)
+
+        with pytest.raises(RuntimeError):
+            vs.separate(Path("song.mp3"))
 
 
 # ---------------------------------------------------------------------------

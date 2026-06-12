@@ -10,6 +10,8 @@ This module is only imported when ``--separate-vocals`` is passed.
 
 from __future__ import annotations
 
+import atexit
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -31,6 +33,9 @@ def separate(audio_path: Path) -> Path:
         If the expected vocals file is not produced.
     """
     outdir = Path(tempfile.mkdtemp(prefix="syncalong_demucs_"))
+    # The intermediate WAVs are large — remove them when the process exits
+    # (the vocals are only needed until transcription finishes).
+    atexit.register(shutil.rmtree, outdir, ignore_errors=True)
 
     cmd = [
         sys.executable, "-m", "demucs",
@@ -39,15 +44,17 @@ def separate(audio_path: Path) -> Path:
         str(audio_path),
     ]
 
+    # Let demucs progress stream to the user's terminal (it can run for
+    # minutes); redirect its stdout to stderr so ours stays clean for LRC.
     result = subprocess.run(
         cmd,
-        capture_output=True,
+        stdout=sys.stderr,
         text=True,
     )
 
     if result.returncode != 0:
         raise RuntimeError(
-            f"Demucs failed (exit {result.returncode}):\n{result.stderr}"
+            f"Demucs failed (exit {result.returncode}) — see output above."
         )
 
     # Demucs output structure: <outdir>/htdemucs/<stem_name>/vocals.wav
