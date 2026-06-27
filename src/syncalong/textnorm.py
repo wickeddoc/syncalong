@@ -11,12 +11,19 @@ import unicodedata
 
 
 def normalize(text: str) -> str:
-    """Lowercase, strip punctuation and accents, collapse whitespace.
+    """Lowercase, strip punctuation and accents, and collapse whitespace.
 
     Apostrophes are deleted so contractions stay one token ("don't" →
-    "dont"); all other punctuation becomes a word boundary so hyphenated
-    compounds split the way Whisper transcribes them ("déjà-vu" →
-    "deja vu").
+    "dont"); every other punctuation mark becomes a word boundary so
+    hyphenated compounds split the way Whisper transcribes them ("déjà-vu" →
+    "deja vu"). Both sides of the aligner must call this so fuzzy matching
+    compares like with like.
+
+    Args:
+        text: Arbitrary input text.
+
+    Returns:
+        The normalised text.
     """
     text = unicodedata.normalize("NFKD", text)
     # Drop combining accent marks — deleting, not spacing, so accented

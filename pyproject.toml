@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "syncalong"
 version = "0.1.0"
-description = "CLI tool to timestamp lyrics by aligning them against an audio file"
+description = "Forced-alignment library and CLI that timestamps lyrics against an audio file, exporting LRC"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
@@ -22,3 +22,6 @@ syncalong = "syncalong.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+syncalong = ["py.typed"]

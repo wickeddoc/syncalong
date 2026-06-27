@@ -14,6 +14,11 @@ from syncalong.formatter import format_lrc
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build the ``syncalong`` command-line argument parser.
+
+    Returns:
+        The configured :class:`argparse.ArgumentParser`.
+    """
     parser = argparse.ArgumentParser(
         prog="syncalong",
         description=(
@@ -71,11 +76,28 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _demucs_available() -> bool:
+    """Report whether the optional ``demucs`` package is importable.
+
+    Returns:
+        ``True`` if ``demucs`` is installed, else ``False``.
+    """
     return importlib.util.find_spec("demucs") is not None
 
 
 def resolve_audio_path(audio: Path, separate_vocals: bool) -> Path:
-    """Optionally run vocal separation; return the path to use for transcription."""
+    """Optionally run vocal separation and return the path to transcribe.
+
+    Args:
+        audio: The user-supplied audio path.
+        separate_vocals: Whether to isolate vocals with Demucs first.
+
+    Returns:
+        ``audio`` unchanged, or the path to the isolated vocals.
+
+    Raises:
+        SystemExit: If ``separate_vocals`` is requested but ``demucs`` is not
+            installed.
+    """
     if not separate_vocals:
         return audio
 
@@ -96,6 +118,13 @@ def resolve_audio_path(audio: Path, separate_vocals: bool) -> Path:
 
 
 def main(argv: list[str] | None = None) -> None:
+    """Parse arguments and run the full align-to-LRC pipeline.
+
+    Writes the LRC document to stdout and progress messages to stderr.
+
+    Args:
+        argv: Argument vector to parse; defaults to ``sys.argv`` when ``None``.
+    """
     parser = build_parser()
     args = parser.parse_args(argv)
 

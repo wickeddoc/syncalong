@@ -1,7 +1,7 @@
 # syncalong
 
-A CLI tool that aligns plain-text lyrics to an audio file and outputs
-timestamped lyrics in [LRC format](https://en.wikipedia.org/wiki/LRC_(file_format)).
+A Python library and CLI tool that aligns plain-text lyrics to an audio file
+and outputs timestamped lyrics in [LRC format](https://en.wikipedia.org/wiki/LRC_(file_format)).
 
 It uses OpenAI's [Whisper](https://github.com/openai/whisper) to transcribe
 the audio with word-level timestamps, then runs a dynamic-programming
@@ -106,6 +106,64 @@ Standard LRC with `[mm:ss.xx]` timestamps:
 [00:12.34] I walk a lonely road
 [00:15.67] The only one that I have ever known
 ```
+
+## Use as a library
+
+`syncalong` is also an importable package, so you can embed alignment in your
+own code or batch-process a whole album while loading the Whisper model only
+once. `import syncalong` is cheap — the heavy Whisper import is deferred until a
+model is actually loaded.
+
+### Align a single song
+
+```python
+import syncalong
+from pathlib import Path
+
+tx = syncalong.Transcriber(model_name="base")   # load the model once
+
+res = syncalong.align(Path("lyrics.txt"), "song.mp3", transcriber=tx)
+
+print(res.lrc)            # the LRC document, as a string
+res.timed_lines           # [(LyricLine, 12.3), (LyricLine, None), ...]
+res.matched, res.total    # e.g. (28, 30) — lines that got a timestamp / all lines
+```
+
+`align()` accepts `lyrics` as a `pathlib.Path` (read from a file), a `str` of
+lyrics text, or a pre-parsed `list[LyricLine]`; `audio` is a path (`str` or
+`pathlib.Path`). Other keyword arguments: `transcriber` (pass a pre-loaded
+`Transcriber` to reuse across songs), plus the CLI-mirroring `model_name`,
+`language`, `use_lyrics_prompt`, `threshold`, and `separate_vocals`. If you omit
+`transcriber`, `align()` loads a model itself from `model_name`.
+
+### Batch-process an album (reuse the model)
+
+Loading a Whisper model takes seconds, so a long-running job should create one
+`Transcriber` and reuse it. `align_to_lrc()` is a convenience wrapper returning
+just the LRC string (equivalent to `align(...).lrc`):
+
+```python
+import syncalong
+from pathlib import Path
+
+tx = syncalong.Transcriber(model_name="small")   # loaded once for the whole run
+
+for audio in Path("album/").glob("*.flac"):
+    lyrics = audio.with_suffix(".txt")
+    lrc = syncalong.align_to_lrc(lyrics, audio, transcriber=tx)
+    audio.with_suffix(".lrc").write_text(lrc, encoding="utf-8")
+```
+
+Lyrics already in memory? Pass them as a plain string instead of a path:
+
+```python
+text = "I walk a lonely road\nThe only one that I have ever known\n"
+res = syncalong.align(text, "song.mp3", transcriber=tx)
+```
+
+> **Note:** `separate_vocals=True` requires the optional `vocal-separation`
+> extra (`pip install syncalong[vocal-separation]`). Passing it without demucs
+> installed raises `ModuleNotFoundError`.
 
 ## How it works
 

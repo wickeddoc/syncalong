@@ -14,11 +14,12 @@ from pathlib import Path
 
 import pytest
 
-from syncalong.lyrics import parse_lyrics, lyrics_prompt, LyricLine
+from syncalong.lyrics import parse_lyrics, parse_lyrics_text, lyrics_prompt, LyricLine
 from syncalong.textnorm import normalize
-from syncalong.transcribe import WordTimestamp, _build_transcribe_options
+from syncalong.transcribe import WordTimestamp, Transcriber, transcribe_audio, _build_transcribe_options
 from syncalong.align import align_lyrics_to_transcript, _dp_align, _word_score
 from syncalong.formatter import format_lrc, _seconds_to_lrc
+from syncalong.pipeline import align, align_to_lrc, AlignmentResult
 
 
 # ---------------------------------------------------------------------------
@@ -41,6 +42,18 @@ def _make_transcript(words_and_times: list[tuple[str, float, float]]) -> list[Wo
         WordTimestamp(word=w.lower(), raw=w, start=s, end=e)
         for w, s, e in words_and_times
     ]
+
+
+class _FakeModel:
+    """Stand-in for a loaded Whisper model; records calls, returns canned result."""
+
+    def __init__(self, result):
+        self._result = result
+        self.calls = []
+
+    def transcribe(self, audio, **opts):
+        self.calls.append((audio, opts))
+        return self._result
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +103,20 @@ class TestParseLyrics:
         assert "dont" in lines[0].words
         assert "stop" in lines[0].words
         assert "believin" in lines[0].words
+
+
+class TestParseLyricsText:
+    def test_parses_text_without_a_file(self):
+        lines = parse_lyrics_text("Hello world\nGoodbye moon\n")
+        assert [l.words for l in lines] == [["hello", "world"], ["goodbye", "moon"]]
+        assert not lines[0].is_blank
+
+    def test_matches_parse_lyrics_on_same_content(self):
+        text = "[Chorus]\nLa la la\n\nDon’t stop\n"
+        path = _make_lyrics_file(text)
+        from_file = [(l.raw, l.words, l.is_blank) for l in parse_lyrics(path)]
+        from_text = [(l.raw, l.words, l.is_blank) for l in parse_lyrics_text(text)]
+        assert from_file == from_text
 
 
 # ---------------------------------------------------------------------------
@@ -147,6 +174,73 @@ class TestTranscribeOptions:
         assert parser.parse_args(
             ["l.txt", "a.mp3", "--no-lyrics-prompt"]
         ).no_lyrics_prompt is True
+
+
+# ---------------------------------------------------------------------------
+# Transcriber class
+# ---------------------------------------------------------------------------
+
+class TestTranscriber:
+    def test_injected_model_extracts_words_and_forwards_options(self):
+        result = {"segments": [{"words": [
+            {"word": " Hello", "start": 1.0, "end": 1.5},
+            {"word": " world", "start": 2.0, "end": 2.5},
+        ]}]}
+        fake = _FakeModel(result)
+        tx = Transcriber(model=fake)
+        words = tx.transcribe(Path("song.mp3"), language="en", initial_prompt="hi")
+        assert [w.word for w in words] == ["hello", "world"]
+        assert [w.start for w in words] == [1.0, 2.0]
+        _, opts = fake.calls[0]
+        assert opts["word_timestamps"] is True
+        assert opts["condition_on_previous_text"] is False
+        assert opts["language"] == "en"
+        assert opts["initial_prompt"] == "hi"
+
+    def test_reuses_same_model_across_calls(self):
+        fake = _FakeModel({"segments": []})
+        tx = Transcriber(model=fake)
+        tx.transcribe(Path("a.mp3"))
+        tx.transcribe(Path("b.mp3"))
+        assert len(fake.calls) == 2
+
+    def test_model_name_retained_on_load_path(self, monkeypatch):
+        import sys
+        import types
+        import syncalong.transcribe as tr
+        fake = _FakeModel({"segments": []})
+        fake_whisper = types.ModuleType("whisper")
+        # setattr (not attribute assignment) keeps type checkers happy about
+        # adding a member to a ModuleType instance.
+        setattr(fake_whisper, "load_model", lambda name: fake)
+        monkeypatch.setitem(sys.modules, "whisper", fake_whisper)
+        tx = tr.Transcriber("medium")
+        assert tx.model_name == "medium"
+        assert tx._model is fake
+
+    def test_model_name_none_when_model_injected(self):
+        tx = Transcriber(model=_FakeModel({"segments": []}))
+        assert tx.model_name is None
+
+    def test_transcribe_audio_delegates_to_transcriber(self, monkeypatch):
+        import syncalong.transcribe as tr
+        captured = {}
+
+        class FakeTranscriber:
+            def __init__(self, model_name="base", *, model=None):
+                captured["model_name"] = model_name
+
+            def transcribe(self, audio_path, *, language=None, initial_prompt=None):
+                captured["args"] = (audio_path, language, initial_prompt)
+                return [WordTimestamp("hi", "hi", 0.0, 0.5)]
+
+        monkeypatch.setattr(tr, "Transcriber", FakeTranscriber)
+        words = tr.transcribe_audio(
+            Path("s.mp3"), model_name="small", language="de", initial_prompt="x"
+        )
+        assert captured["model_name"] == "small"
+        assert captured["args"] == (Path("s.mp3"), "de", "x")
+        assert words[0].word == "hi"
 
 
 # ---------------------------------------------------------------------------
@@ -393,3 +487,98 @@ class TestLRCFormatter:
         lrc = format_lrc([(line, None)])
         assert "Mystery line" in lrc
         assert "[" not in lrc.split("Mystery")[0]  # No tag
+
+
+# ---------------------------------------------------------------------------
+# High-level pipeline facade
+# ---------------------------------------------------------------------------
+
+class TestAlignFacade:
+    def _fake_transcriber(self):
+        result = {"segments": [{"words": [
+            {"word": " hello", "start": 1.0, "end": 1.5},
+            {"word": " world", "start": 2.0, "end": 2.5},
+            {"word": " goodbye", "start": 4.0, "end": 4.5},
+            {"word": " moon", "start": 5.0, "end": 5.5},
+        ]}]}
+        return Transcriber(model=_FakeModel(result))
+
+    def test_returns_result_with_counts_and_lrc(self):
+        res = align("hello world\ngoodbye moon\n", "song.mp3",
+                    transcriber=self._fake_transcriber())
+        assert isinstance(res, AlignmentResult)
+        assert (res.matched, res.total) == (2, 2)
+        assert [ts for _, ts in res.timed_lines] == [1.0, 4.0]
+        assert "[00:01.00] hello world" in res.lrc
+
+    def test_accepts_str_path_and_lines(self, tmp_path):
+        p = tmp_path / "lyr.txt"
+        p.write_text("hello world\ngoodbye moon\n", encoding="utf-8")
+        lines = parse_lyrics_text("hello world\ngoodbye moon\n")
+        results = [
+            align("hello world\ngoodbye moon\n", "s.mp3", transcriber=self._fake_transcriber()),
+            align(p, "s.mp3", transcriber=self._fake_transcriber()),
+            align(lines, "s.mp3", transcriber=self._fake_transcriber()),
+        ]
+        for r in results:
+            assert [ts for _, ts in r.timed_lines] == [1.0, 4.0]
+
+    def test_align_to_lrc_equals_align_lrc(self):
+        lyrics = "hello world\ngoodbye moon\n"
+        a = align_to_lrc(lyrics, "s.mp3", transcriber=self._fake_transcriber())
+        b = align(lyrics, "s.mp3", transcriber=self._fake_transcriber()).lrc
+        assert a == b
+
+    def test_use_lyrics_prompt_toggles_prompt(self):
+        fake_on = _FakeModel({"segments": []})
+        align("hello world\n", "s.mp3", transcriber=Transcriber(model=fake_on),
+              use_lyrics_prompt=True)
+        assert fake_on.calls[0][1].get("initial_prompt") == "hello world"
+
+        fake_off = _FakeModel({"segments": []})
+        align("hello world\n", "s.mp3", transcriber=Transcriber(model=fake_off),
+              use_lyrics_prompt=False)
+        assert "initial_prompt" not in fake_off.calls[0][1]
+
+    def test_rejects_bad_lyrics_type(self):
+        with pytest.raises(TypeError):
+            # 123 is deliberately the wrong type — verify the runtime guard.
+            align(123, "s.mp3", transcriber=self._fake_transcriber())  # type: ignore[arg-type]
+
+    def test_separate_vocals_without_demucs_raises(self, monkeypatch):
+        import importlib.util
+        monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)
+        with pytest.raises(ModuleNotFoundError):
+            align("hello world\n", "s.mp3",
+                  transcriber=self._fake_transcriber(), separate_vocals=True)
+
+
+class TestPublicAPI:
+    def test_top_level_exports_present(self):
+        import syncalong
+        for name in [
+            "align", "align_to_lrc", "AlignmentResult", "Transcriber",
+            "transcribe_audio", "WordTimestamp", "parse_lyrics",
+            "parse_lyrics_text", "lyrics_prompt", "LyricLine",
+            "align_lyrics_to_transcript", "format_lrc", "separate",
+            "__version__",
+        ]:
+            assert name in syncalong.__all__, f"{name} missing from __all__"
+            assert hasattr(syncalong, name), f"{name} not importable"
+
+    def test_importing_syncalong_does_not_load_whisper(self):
+        import subprocess
+        import sys
+        subprocess.run(
+            [sys.executable, "-c",
+             "import syncalong, sys; assert 'whisper' not in sys.modules"],
+            check=True,
+        )
+
+
+class TestPackaging:
+    def test_py_typed_marker_present(self):
+        import pathlib
+        import syncalong
+        marker = pathlib.Path(syncalong.__file__).parent / "py.typed"
+        assert marker.is_file()

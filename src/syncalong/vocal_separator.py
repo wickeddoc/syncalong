@@ -19,18 +19,20 @@ from pathlib import Path
 
 
 def separate(audio_path: Path) -> Path:
-    """
-    Run Demucs on *audio_path* and return the path to the isolated vocals.
+    """Run Demucs on an audio file and return the isolated vocals path.
 
-    Demucs writes its output to a temp directory and we return the path to
-    the ``vocals.wav`` file.
+    Demucs writes to a temporary directory (removed at process exit via
+    ``atexit``) and this returns the path to the produced ``vocals.wav``.
 
-    Raises
-    ------
-    RuntimeError
-        If Demucs exits with a non-zero status.
-    FileNotFoundError
-        If the expected vocals file is not produced.
+    Args:
+        audio_path: The mixed audio file to separate.
+
+    Returns:
+        Path to the isolated ``vocals.wav``.
+
+    Raises:
+        RuntimeError: If Demucs exits with a non-zero status.
+        FileNotFoundError: If no vocals file is produced.
     """
     outdir = Path(tempfile.mkdtemp(prefix="syncalong_demucs_"))
     # The intermediate WAVs are large — remove them when the process exits

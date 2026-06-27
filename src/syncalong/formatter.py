@@ -6,15 +6,22 @@ from syncalong.lyrics import LyricLine
 
 
 def _seconds_to_lrc(seconds: float) -> str:
-    """
-    Convert seconds to LRC timestamp: ``[mm:ss.xx]``.
+    """Convert seconds to an LRC timestamp tag ``[mm:ss.xx]``.
 
-    Examples
-    --------
-    >>> _seconds_to_lrc(0.0)
-    '[00:00.00]'
-    >>> _seconds_to_lrc(73.456)
-    '[01:13.46]'
+    Rounds to centiseconds first so e.g. 59.999 carries into the next minute
+    instead of formatting as an invalid ``[00:60.00]``.
+
+    Args:
+        seconds: A non-negative time in seconds.
+
+    Returns:
+        The timestamp formatted as ``[mm:ss.xx]``.
+
+    Examples:
+        >>> _seconds_to_lrc(0.0)
+        '[00:00.00]'
+        >>> _seconds_to_lrc(73.456)
+        '[01:13.46]'
     """
     # Round to centiseconds first so 59.999 carries into the minute
     # instead of formatting as "60.00" seconds.
@@ -26,12 +33,17 @@ def _seconds_to_lrc(seconds: float) -> str:
 def format_lrc(
     timed_lines: list[tuple[LyricLine, float | None]],
 ) -> str:
-    """
-    Produce an LRC-formatted string from aligned lyrics.
+    """Render aligned lyrics as an LRC document.
 
-    Lines with no timestamp are emitted without a time tag (some LRC
-    players will just display them statically).  Blank lines become
-    empty timed lines to preserve the song's visual structure.
+    Lines with no timestamp are emitted without a time tag (some players show
+    them statically). Blank lines become empty timed lines to preserve the
+    song's visual structure.
+
+    Args:
+        timed_lines: ``(LyricLine, timestamp_or_None)`` pairs in order.
+
+    Returns:
+        The LRC document, newline-terminated.
     """
     parts: list[str] = []
 

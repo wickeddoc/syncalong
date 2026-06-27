@@ -4,26 +4,34 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from syncalong.textnorm import normalize
 
 
 @dataclass
 class WordTimestamp:
-    """A single word with its start/end time in seconds."""
+    """A single recognised word with its timing.
 
-    word: str       # Normalized text
-    raw: str        # Original text from Whisper
-    start: float    # Seconds
-    end: float      # Seconds
+    Attributes:
+        word: Normalized text (for matching).
+        raw: Original text from Whisper.
+        start: Start time in seconds.
+        end: End time in seconds.
+    """
+
+    word: str
+    raw: str
+    start: float
+    end: float
 
 
 def _build_transcribe_options(
     *,
     language: str | None,
     initial_prompt: str | None,
-) -> dict:
-    opts: dict = {
+) -> dict[str, Any]:
+    opts: dict[str, Any] = {
         "word_timestamps": True,
         # Music is a classic trigger for Whisper's repetition/hallucination
         # loops, especially with repeated choruses — don't condition each
@@ -37,43 +45,16 @@ def _build_transcribe_options(
     return opts
 
 
-def transcribe_audio(
-    audio_path: Path,
-    *,
-    model_name: str = "base",
-    language: str | None = None,
-    initial_prompt: str | None = None,
-) -> list[WordTimestamp]:
+def _extract_words(result: dict[str, Any]) -> list[WordTimestamp]:
+    """Flatten Whisper's segmented result into word timestamps.
+
+    Args:
+        result: The dict returned by ``model.transcribe(...)``.
+
+    Returns:
+        Normalised word timestamps, in order; words that normalise to empty
+        are skipped.
     """
-    Run Whisper on *audio_path* and return word-level timestamps.
-
-    Parameters
-    ----------
-    audio_path : Path
-        Audio file (any format ffmpeg can decode).
-    model_name : str
-        Whisper model size: tiny | base | small | medium | large.
-    language : str or None
-        BCP-47 language code. ``None`` = auto-detect.
-    initial_prompt : str or None
-        Text to bias the decoder with (e.g. the song's lyrics).
-
-    Returns
-    -------
-    list[WordTimestamp]
-        Ordered list of every word Whisper recognised, with timing.
-    """
-    import whisper  # Heavy import — keep lazy
-
-    model = whisper.load_model(model_name)
-
-    transcribe_opts = _build_transcribe_options(
-        language=language,
-        initial_prompt=initial_prompt,
-    )
-
-    result = model.transcribe(str(audio_path), **transcribe_opts)
-
     words: list[WordTimestamp] = []
     for segment in result.get("segments", []):
         for w in segment.get("words", []):
@@ -84,12 +65,83 @@ def transcribe_audio(
             if not norm:
                 continue
             words.append(
-                WordTimestamp(
-                    word=norm,
-                    raw=raw,
-                    start=w["start"],
-                    end=w["end"],
-                )
+                WordTimestamp(word=norm, raw=raw, start=w["start"], end=w["end"])
             )
-
     return words
+
+
+class Transcriber:
+    """Reusable Whisper transcriber that loads its model once.
+
+    Loading a Whisper model is expensive, so a long-running consumer (e.g. a
+    jukebox processing many songs) should create one ``Transcriber`` and call
+    :meth:`transcribe` repeatedly rather than calling
+    :func:`transcribe_audio` per song.
+
+    Args:
+        model_name: Whisper model size or variant (``tiny``, ``base``,
+            ``small``, ``medium``, ``large``, ``turbo``, ``small.en``,
+            ``large-v3``, ...). Ignored when ``model`` is provided.
+        model: A preloaded Whisper model object. When given it is used as-is
+            and ``model_name`` is not loaded — useful for sharing an
+            already-loaded model or injecting a test double.
+    """
+
+    def __init__(self, model_name: str = "base", *, model: Any = None):
+        injected = model is not None
+        if model is None:
+            import whisper  # Heavy import — keep lazy
+
+            model = whisper.load_model(model_name)
+        self.model_name = None if injected else model_name
+        self._model: Any = model
+
+    def transcribe(
+        self,
+        audio_path: Path,
+        *,
+        language: str | None = None,
+        initial_prompt: str | None = None,
+    ) -> list[WordTimestamp]:
+        """Transcribe one audio file into word-level timestamps.
+
+        Args:
+            audio_path: Audio file (any format ffmpeg can decode).
+            language: BCP-47 language code, or ``None`` to auto-detect.
+            initial_prompt: Text to bias the decoder with (e.g. the lyrics).
+
+        Returns:
+            Every recognised word, in order, with start/end times in seconds.
+        """
+        opts = _build_transcribe_options(
+            language=language, initial_prompt=initial_prompt
+        )
+        result = self._model.transcribe(str(audio_path), **opts)
+        return _extract_words(result)
+
+
+def transcribe_audio(
+    audio_path: Path,
+    *,
+    model_name: str = "base",
+    language: str | None = None,
+    initial_prompt: str | None = None,
+) -> list[WordTimestamp]:
+    """Transcribe one audio file, loading the model for this call only.
+
+    Convenience wrapper around :class:`Transcriber` for one-shot use. A
+    consumer that transcribes many files should instantiate a
+    :class:`Transcriber` once and reuse it instead.
+
+    Args:
+        audio_path: Audio file (any format ffmpeg can decode).
+        model_name: Whisper model size or variant.
+        language: BCP-47 language code, or ``None`` to auto-detect.
+        initial_prompt: Text to bias the decoder with (e.g. the lyrics).
+
+    Returns:
+        Ordered word timestamps.
+    """
+    return Transcriber(model_name).transcribe(
+        audio_path, language=language, initial_prompt=initial_prompt
+    )

@@ -36,12 +36,18 @@ except ImportError:
 
 @lru_cache(maxsize=None)
 def _word_score(a: str, b: str) -> float:
-    """
-    Return a 0–100 similarity score between two normalised words.
+    """Return a 0–100 fuzzy similarity score between two normalised words.
 
-    Uses rapidfuzz for speed; falls back to difflib if unavailable.
-    Cached: the DP loop scores every lyric×transcript word pair, and song
-    vocabularies repeat heavily, so most pairs recur thousands of times.
+    Uses rapidfuzz for speed, falling back to difflib if unavailable. Cached:
+    the DP loop scores every lyric×transcript pair and song vocabularies
+    repeat heavily, so most pairs recur many times.
+
+    Args:
+        a: First normalised word.
+        b: Second normalised word.
+
+    Returns:
+        Similarity in 0–100 (100 for an exact match).
     """
     if a == b:
         return 100.0
@@ -57,19 +63,21 @@ def _dp_align(
     transcript_words: list[WordTimestamp],
     threshold: float,
 ) -> dict[int, int]:
-    """
-    Find the best monotonic alignment of *lyric_words* → *transcript_words*.
+    """Find the best monotonic alignment of lyric words to transcript words.
 
-    Returns a mapping ``{lyric_word_index: transcript_word_index}`` for
-    every lyric word that matched above *threshold*.
+    Needleman–Wunsch-style DP where ``dp[i][j]`` is the best cumulative score
+    aligning ``lyric[:i]`` to ``transcript[:j]``. Transitions: skip a
+    transcript word, skip a lyric word (small penalty), or match a pair when
+    its score clears ``threshold``.
 
-    We define:
-        dp[i][j] = best cumulative score aligning lyric[:i] to transcript[:j]
+    Args:
+        lyric_words: Flattened, normalised lyric words in order.
+        transcript_words: Transcript word timestamps in order.
+        threshold: Minimum fuzzy score (0–100) for a pair to count as a match.
 
-    Transitions:
-        - skip transcript word j  → dp[i][j-1]
-        - skip lyric word i       → dp[i-1][j]   (with a small penalty)
-        - match i↔j               → dp[i-1][j-1] + score(i,j)  if score ≥ threshold
+    Returns:
+        Mapping ``{lyric_word_index: transcript_word_index}`` for every lyric
+        word matched above ``threshold``.
     """
     n = len(lyric_words)
     m = len(transcript_words)
@@ -146,24 +154,19 @@ def align_lyrics_to_transcript(
     *,
     threshold: float = 55.0,
 ) -> list[tuple[LyricLine, float | None]]:
-    """
-    Align parsed lyrics to a word-level transcript.
+    """Align parsed lyrics to a word-level transcript.
 
-    Parameters
-    ----------
-    lyric_lines : list[LyricLine]
-        Parsed lyrics (from ``parse_lyrics``).
-    transcript : list[WordTimestamp]
-        Word timestamps (from ``transcribe_audio``).
-    threshold : float
-        Minimum fuzzy score (0–100) to accept a match.
+    Args:
+        lyric_lines: Parsed lyrics (from
+            :func:`~syncalong.lyrics.parse_lyrics`).
+        transcript: Word timestamps (from
+            :func:`~syncalong.transcribe.transcribe_audio`).
+        threshold: Minimum fuzzy score (0–100) to accept a match.
 
-    Returns
-    -------
-    list of (LyricLine, timestamp_or_None)
-        One entry per lyric line.  The timestamp (seconds) is the start time
-        of the first matched word in that line, or ``None`` if no word in
-        the line could be aligned.
+    Returns:
+        One ``(LyricLine, timestamp_or_None)`` pair per lyric line. The
+        timestamp (seconds) is the start time of the first matched word in the
+        line, or ``None`` if no word in the line could be aligned.
     """
     # Flatten all lyric words into a single ordered list, keeping a back-
     # reference so we can map results back to lines.
@@ -210,7 +213,13 @@ def _interpolate_gaps(
     timestamps: dict[int, float],
     matched: list[int],
 ) -> None:
-    """Fill small gaps between matched lines with linearly interpolated times."""
+    """Fill gaps between matched lines with linearly interpolated times.
+
+    Args:
+        lines: All lyric lines.
+        timestamps: Map of line index → timestamp, mutated in place.
+        matched: Sorted indices of lines that already have a timestamp.
+    """
     for k in range(len(matched) - 1):
         start_li = matched[k]
         end_li = matched[k + 1]
@@ -239,14 +248,19 @@ def _extrapolate_edges(
     t_min: float,
     t_max: float,
 ) -> None:
-    """
-    Estimate timestamps for unmatched lines before the first matched line
-    and after the last one, so no sung line is left untagged (untagged
-    lines are dropped by many LRC players).
+    """Estimate timestamps for unmatched lines before the first / after the
+    last matched line.
 
-    Treats the transcript's start and end as virtual anchors at line
-    index -1 and ``len(lines)`` and interpolates linearly, mirroring the
-    scheme used for interior gaps.
+    No sung line should be left untagged, since untagged lines are dropped by
+    many LRC players. The transcript's start and end act as virtual anchors at
+    line index ``-1`` and ``len(lines)``.
+
+    Args:
+        lines: All lyric lines.
+        timestamps: Map of line index → timestamp, mutated in place.
+        matched: Sorted indices of lines that already have a timestamp.
+        t_min: Transcript start time (virtual leading anchor).
+        t_max: Transcript end time (virtual trailing anchor).
     """
     first, last = matched[0], matched[-1]
 
