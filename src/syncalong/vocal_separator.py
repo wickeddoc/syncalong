@@ -1,5 +1,4 @@
-"""
-Optional vocal isolation using Meta's Demucs.
+"""Optional vocal isolation using Meta's Demucs.
 
 Separating vocals from the instrumental track dramatically improves
 alignment accuracy on studio recordings where background music would
@@ -40,9 +39,13 @@ def separate(audio_path: Path) -> Path:
     atexit.register(shutil.rmtree, outdir, ignore_errors=True)
 
     cmd = [
-        sys.executable, "-m", "demucs",
-        "--two-stems", "vocals",
-        "-o", str(outdir),
+        sys.executable,
+        "-m",
+        "demucs",
+        "--two-stems",
+        "vocals",
+        "-o",
+        str(outdir),
         str(audio_path),
     ]
 

@@ -88,9 +88,19 @@ class Transcriber:
     """
 
     def __init__(self, model_name: str = "base", *, model: Any = None):
+        """Initialize the transcriber, loading a Whisper model if none is given.
+
+        Args:
+            model_name: Whisper model size or variant to load when ``model`` is
+                ``None``. See the class docstring for accepted values.
+            model: A preloaded Whisper model to use as-is instead of loading one.
+        """
         injected = model is not None
         if model is None:
-            import whisper  # Heavy import — keep lazy
+            # Heavy import, kept lazy so `import syncalong` never pulls in
+            # whisper/torch. It is also deliberately absent at type-check time
+            # in CI, hence the ignore.
+            import whisper  # type: ignore[import-not-found]
 
             model = whisper.load_model(model_name)
         self.model_name = None if injected else model_name

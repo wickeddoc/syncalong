@@ -18,7 +18,7 @@ lyrics file ─► lyrics.py ─────────┘
 - `lyrics.py` — Parses a plain-text lyrics file into `LyricLine` dataclasses. Detects section headers like `[Chorus]` and `(Bridge)` as blank lines. Also builds the Whisper `initial_prompt` from the lyric text (`lyrics_prompt()`).
 - `textnorm.py` — Shared `normalize()` (lowercase, strip accents, collapse whitespace; apostrophes deleted so contractions stay one token, other punctuation becomes a word boundary so hyphenated compounds split) used by both `lyrics.py` and `transcribe.py` so the two sides of the aligner normalize identically.
 - `transcribe.py` — The `Transcriber` class loads a Whisper model once (`whisper.load_model()`) and exposes `.transcribe()` (with `word_timestamps=True`, `condition_on_previous_text=False`, and an optional lyrics `initial_prompt`), returning `WordTimestamp` dataclasses. A long-running caller reuses one `Transcriber`; `transcribe_audio()` is a thin one-shot wrapper over it (unchanged API). The heavy whisper import stays lazy inside `Transcriber.__init__` (reached only when no model is injected), so `import syncalong` never pulls in whisper.
-- `align.py` — Core algorithm. Needleman–Wunsch-style DP over the flat lyric word list × transcript word list. Uses `rapidfuzz.fuzz.ratio` for fuzzy word scoring (falls back to `difflib`; scores are `lru_cache`d since song vocabularies repeat heavily). Enforces monotonic alignment so repeated sections don't cross-match. Interpolates timestamps linearly for unmatched lines between matched anchors, and extrapolates lines before the first / after the last anchor from the transcript's start and end times. Public API: `align_lyrics_to_transcript()`.
+- `align.py` — Core algorithm. Needleman–Wunsch-style DP over the flat lyric word list × transcript word list. Uses `rapidfuzz.fuzz.ratio` for fuzzy word scoring (falls back to `difflib`; scores are `functools.cache`d since song vocabularies repeat heavily). Enforces monotonic alignment so repeated sections don't cross-match. Interpolates timestamps linearly for unmatched lines between matched anchors, and extrapolates lines before the first / after the last anchor from the transcript's start and end times. Public API: `align_lyrics_to_transcript()`.
 - `formatter.py` — Converts `list[tuple[LyricLine, float | None]]` to LRC string. Timestamps formatted as `[mm:ss.xx]`.
 - `vocal_separator.py` — Optional module, only imported when `--separate-vocals` is passed. Shells out to `demucs` via subprocess to isolate vocals before transcription. Progress streams to stderr (stdout stays clean for LRC); the temp output dir is removed at process exit via `atexit`.
 - `pipeline.py` — High-level library facade. `align()` runs the whole lyrics+audio → `AlignmentResult` pipeline (`.timed_lines`, `.lrc`, `.matched`, `.total`); its `lyrics` argument is type-driven (`Path` = read a file, `str` = lyrics text, `list[LyricLine]` = already parsed). `align_to_lrc()` returns just the LRC string. `separate_vocals=True` raises `ModuleNotFoundError` when demucs is absent (library-appropriate, vs the CLI's `sys.exit`). Both are re-exported from the package root alongside the building blocks; the CLI keeps its own orchestration so its stderr/exit behavior is unchanged.
@@ -34,14 +34,24 @@ lyrics file ─► lyrics.py ─────────┘
 ## Commands
 
 ```bash
-# Install in editable mode (with test dependencies)
-pip install -e ".[dev]"
+# Install dev + docs tooling in editable mode
+pip install -e ".[dev,docs]"
 
 # Install with optional vocal separation
 pip install -e ".[vocal-separation]"
 
-# Run tests
+# Quality gate (mirrors CI — all four must pass)
 python -m pytest tests/ -v
+ruff check .
+black --check .
+pyright src
+
+# Build & preview the docs site
+mkdocs serve          # live preview at http://127.0.0.1:8000
+mkdocs build --strict # what CI runs
+
+# Build the package
+python -m build       # sdist + wheel into ./dist
 
 # Run the tool
 syncalong lyrics.txt song.mp3
@@ -67,11 +77,47 @@ lrc = syncalong.align_to_lrc(Path("lyrics.txt"), "song.mp3", transcriber=tx)
 
 ## Dependencies
 
+Runtime:
+
 - `openai-whisper` — speech recognition with word-level timestamps
 - `rapidfuzz` — fast fuzzy string matching for the aligner
-- `demucs` (optional) — vocal isolation from Meta
+- `demucs` (optional, `vocal-separation` extra) — vocal isolation from Meta
+
+Optional-dependency groups (`pyproject.toml`):
+
+- `dev` — `pytest`, `ruff`, `black`, `pyright`, `build`, `twine`
+- `docs` — `mkdocs-material`, `mkdocstrings[python]`
+- `vocal-separation` — `demucs`
 
 System dependency: `ffmpeg` must be installed for Whisper audio decoding.
+
+## Release, Packaging & Documentation
+
+- **Versioning is tag-driven.** `setuptools-scm` derives the version from the
+  latest git tag — there is **no** hardcoded version in the source. Tag `v0.1.0`
+  → version `0.1.0`; commits after a tag → `0.1.1.devN+g<hash>`. `__version__`
+  is read at runtime from installed metadata (`importlib.metadata.version`).
+  To release, bump `CHANGELOG.md`, then `git tag -a vX.Y.Z && git push --tags`.
+- **CI** (`.github/workflows/ci.yml`, on push/PR): a `quality` job (ruff, black
+  `--check`, `pyright src`), a `test` matrix (Python 3.9–3.13), and a strict
+  `docs` build. CI is intentionally **torch-free** — the test suite injects a
+  fake Whisper model, and pyright resolves everything except the lazy
+  `import whisper` (which carries a `# type: ignore[import-not-found]`). This
+  keeps CI fast and avoids torch/Python-version flakiness.
+- **Release** (`.github/workflows/release.yml`, on `v*.*.*` tag): builds the
+  sdist + wheel, publishes to PyPI via **Trusted Publishing (OIDC)** — no stored
+  token — then creates a GitHub Release with the artifacts attached. PyPI must
+  have a trusted publisher configured for this repo + `release.yml` + the `pypi`
+  environment.
+- **Docs** are MkDocs Material + mkdocstrings (`mkdocs.yml`, `docs/`), published
+  on ReadTheDocs (`.readthedocs.yaml`). The API reference is generated from the
+  Google-style docstrings; mkdocstrings reads the source statically from `src/`
+  (via `paths: [src]`), so the docs build never installs whisper/torch either.
+- **License:** MIT (`LICENSE`), declared with the PEP 639 SPDX expression
+  `license = "MIT"` in `pyproject.toml`.
+- **Copyrighted audio never ships.** The git-ignored `test/` directory holds
+  local audio fixtures; the sdist file list (via setuptools-scm) only includes
+  git-tracked files, so nothing under `test/` can leak into a release.
 
 ## Testing
 
@@ -99,5 +145,6 @@ Test classes:
 - Text normalization lives in `textnorm.py` and is shared by `lyrics.py` and `transcribe.py` — never reimplement it locally; both sides must normalize identically.
 - Status/progress messages go to stderr; only LRC output goes to stdout.
 - Whisper is imported lazily inside `Transcriber.__init__()` (reached only when no model is injected) to keep CLI startup fast and ensure `import syncalong` never loads whisper.
-- The public API is curated in `src/syncalong/__init__.py` via explicit re-exports + `__all__`; the package ships a `py.typed` marker, so keep type hints on the public surface correct (`pyright src/` should stay clean).
-- All classes and functions use Google-style docstrings (`Args:` / `Returns:` / `Raises:` / `Attributes:` as applicable).
+- The public API is curated in `src/syncalong/__init__.py` via explicit re-exports + `__all__`; the package ships a `py.typed` marker, so keep type hints on the public surface correct (`pyright src/` should stay clean). `__version__` is sourced from installed metadata, not hardcoded.
+- All classes and functions use Google-style docstrings (`Args:` / `Returns:` / `Raises:` / `Attributes:` as applicable). Ruff's pydocstyle rules (google convention) enforce their presence.
+- Formatting is **black** and linting is **ruff** (both configured in `pyproject.toml`, line length 88); run `black .` / `ruff check --fix .` before committing. The full quality gate — `pytest`, `ruff check .`, `black --check .`, `pyright src` — must stay green and is enforced in CI.

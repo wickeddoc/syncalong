@@ -1,5 +1,4 @@
-"""
-Align lyrics to Whisper transcript using dynamic-programming sequence alignment.
+"""Align lyrics to a Whisper transcript with dynamic-programming alignment.
 
 The algorithm is a variant of the Needleman–Wunsch / Smith–Waterman family:
 both the lyric word sequence and the transcript word sequence are in temporal
@@ -12,11 +11,10 @@ typical song (< 600 words each) this takes a few milliseconds.
 
 from __future__ import annotations
 
-from functools import lru_cache
+from functools import cache
 
 from syncalong.lyrics import LyricLine
 from syncalong.transcribe import WordTimestamp
-
 
 # ---------------------------------------------------------------------------
 # Fuzzy word similarity
@@ -27,6 +25,7 @@ try:
 
     def _ratio(a: str, b: str) -> float:
         return _rf_ratio(a, b)
+
 except ImportError:
     from difflib import SequenceMatcher
 
@@ -34,7 +33,7 @@ except ImportError:
         return SequenceMatcher(None, a, b).ratio() * 100.0
 
 
-@lru_cache(maxsize=None)
+@cache
 def _word_score(a: str, b: str) -> float:
     """Return a 0–100 fuzzy similarity score between two normalised words.
 
@@ -57,6 +56,7 @@ def _word_score(a: str, b: str) -> float:
 # ---------------------------------------------------------------------------
 # DP alignment
 # ---------------------------------------------------------------------------
+
 
 def _dp_align(
     lyric_words: list[str],
@@ -106,7 +106,7 @@ def _dp_align(
         lw = lyric_words[i - 1]
         for j in range(1, m + 1):
             tw = transcript_words[j - 1].word
-            best = dp[idx(i, j - 1)]       # skip transcript word
+            best = dp[idx(i, j - 1)]  # skip transcript word
             best_t = 1
 
             val = dp[idx(i - 1, j)] + SKIP_LYRIC_PENALTY
@@ -148,6 +148,7 @@ def _dp_align(
 # Public API
 # ---------------------------------------------------------------------------
 
+
 def align_lyrics_to_transcript(
     lyric_lines: list[LyricLine],
     transcript: list[WordTimestamp],
@@ -171,7 +172,7 @@ def align_lyrics_to_transcript(
     # Flatten all lyric words into a single ordered list, keeping a back-
     # reference so we can map results back to lines.
     flat_words: list[str] = []
-    word_to_line: list[int] = []      # flat index → index into lyric_lines
+    word_to_line: list[int] = []  # flat index → index into lyric_lines
 
     for li, line in enumerate(lyric_lines):
         for w in line.words:
@@ -202,10 +203,7 @@ def align_lyrics_to_transcript(
             t_max=transcript[-1].end,
         )
 
-    return [
-        (line, line_timestamps.get(i))
-        for i, line in enumerate(lyric_lines)
-    ]
+    return [(line, line_timestamps.get(i)) for i, line in enumerate(lyric_lines)]
 
 
 def _interpolate_gaps(
@@ -248,9 +246,9 @@ def _extrapolate_edges(
     t_min: float,
     t_max: float,
 ) -> None:
-    """Estimate timestamps for unmatched lines before the first / after the
-    last matched line.
+    """Estimate timestamps for lines outside the matched range.
 
+    Extrapolate unmatched lines before the first match or after the last one.
     No sung line should be left untagged, since untagged lines are dropped by
     many LRC players. The transcript's start and end act as virtual anchors at
     line index ``-1`` and ``len(lines)``.

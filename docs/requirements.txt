@@ -1,0 +1,6 @@
+# Documentation build dependencies (used by ReadTheDocs and `mkdocs serve`).
+# The package itself is NOT installed for the docs build: mkdocstrings reads the
+# source statically from `src/` (see `paths: [src]` in mkdocs.yml), so the heavy
+# openai-whisper/torch runtime dependency is never pulled in.
+mkdocs-material>=9.5
+mkdocstrings[python]>=0.24

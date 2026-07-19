@@ -11,7 +11,6 @@ from syncalong.formatter import format_lrc
 from syncalong.lyrics import LyricLine, lyrics_prompt, parse_lyrics, parse_lyrics_text
 from syncalong.transcribe import Transcriber
 
-
 LyricsInput = Union[str, Path, list[LyricLine]]
 AudioInput = Union[str, Path]
 

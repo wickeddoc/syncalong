@@ -7,10 +7,10 @@ import importlib.util
 import sys
 from pathlib import Path
 
-from syncalong.transcribe import transcribe_audio
-from syncalong.lyrics import parse_lyrics, lyrics_prompt
 from syncalong.align import align_lyrics_to_transcript
 from syncalong.formatter import format_lrc
+from syncalong.lyrics import lyrics_prompt, parse_lyrics
+from syncalong.transcribe import transcribe_audio
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -29,7 +29,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "lyrics",
         type=Path,
-        help="Path to a plain-text file containing the song lyrics (one line per lyric line).",
+        help=(
+            "Path to a plain-text file containing the song lyrics "
+            "(one line per lyric line)."
+        ),
     )
     parser.add_argument(
         "audio",
@@ -37,7 +40,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to the audio file (wav, mp3, flac, ogg, …).",
     )
     parser.add_argument(
-        "-m", "--model",
+        "-m",
+        "--model",
         default="base",
         metavar="MODEL",
         help=(
@@ -48,14 +52,18 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
-        "-l", "--language",
+        "-l",
+        "--language",
         default=None,
         help="Language code (e.g. 'en', 'de'). Auto-detected if omitted.",
     )
     parser.add_argument(
         "--separate-vocals",
         action="store_true",
-        help="Pre-process audio with Demucs to isolate vocals (requires 'demucs' extra).",
+        help=(
+            "Pre-process audio with Demucs to isolate vocals "
+            "(requires 'demucs' extra)."
+        ),
     )
     parser.add_argument(
         "--no-lyrics-prompt",
@@ -70,7 +78,10 @@ def build_parser() -> argparse.ArgumentParser:
         "--threshold",
         type=float,
         default=55.0,
-        help="Minimum fuzzy-match score (0–100) to accept a word alignment. (default: 55)",
+        help=(
+            "Minimum fuzzy-match score (0–100) to accept a word alignment. "
+            "(default: 55)"
+        ),
     )
     return parser
 

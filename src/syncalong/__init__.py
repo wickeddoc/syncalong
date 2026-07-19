@@ -7,6 +7,8 @@ blocks are re-exported for advanced use.
 
 from __future__ import annotations
 
+from importlib.metadata import PackageNotFoundError, version
+
 from syncalong.align import align_lyrics_to_transcript
 from syncalong.formatter import format_lrc
 from syncalong.lyrics import (
@@ -19,7 +21,10 @@ from syncalong.pipeline import AlignmentResult, align, align_to_lrc
 from syncalong.transcribe import Transcriber, WordTimestamp, transcribe_audio
 from syncalong.vocal_separator import separate
 
-__version__ = "0.1.0"
+try:
+    __version__ = version("syncalong")
+except PackageNotFoundError:  # pragma: no cover - source checkout without install
+    __version__ = "0.0.0+unknown"
 
 __all__ = [
     "__version__",

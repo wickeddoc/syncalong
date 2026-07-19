@@ -1,11 +1,19 @@
 # syncalong
 
+[![PyPI version](https://img.shields.io/pypi/v/syncalong.svg)](https://pypi.org/project/syncalong/)
+[![Python versions](https://img.shields.io/pypi/pyversions/syncalong.svg)](https://pypi.org/project/syncalong/)
+[![Documentation](https://img.shields.io/readthedocs/syncalong)](https://syncalong.readthedocs.io/)
+[![CI](https://github.com/wickeddoc/syncalong/actions/workflows/ci.yml/badge.svg)](https://github.com/wickeddoc/syncalong/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 A Python library and CLI tool that aligns plain-text lyrics to an audio file
 and outputs timestamped lyrics in [LRC format](https://en.wikipedia.org/wiki/LRC_(file_format)).
 
 It uses OpenAI's [Whisper](https://github.com/openai/whisper) to transcribe
 the audio with word-level timestamps, then runs a dynamic-programming
 sequence alignment to map those words back onto your lyrics.
+
+📖 **Full documentation:** <https://syncalong.readthedocs.io/>
 
 ## Prerequisites
 
@@ -16,11 +24,13 @@ sequence alignment to map those words back onto your lyrics.
 ## Installation
 
 ```bash
-# From the project directory:
-pip install .
+pip install syncalong
+```
 
-# Or in editable / development mode:
-pip install -e .
+Or from a checkout, in editable / development mode:
+
+```bash
+pip install -e ".[dev,docs]"
 ```
 
 ### Optional: vocal separation
@@ -29,7 +39,7 @@ For better results on studio recordings (where background music may
 confuse the speech model), install with the `vocal-separation` extra:
 
 ```bash
-pip install .[vocal-separation]
+pip install "syncalong[vocal-separation]"
 ```
 
 This adds [Demucs](https://github.com/facebookresearch/demucs), which
@@ -202,3 +212,34 @@ res = syncalong.align(text, "song.mp3", transcriber=tx)
   what's actually sung, the better.
 - **GPU acceleration** — if you have a CUDA-capable GPU and PyTorch is
   installed with CUDA support, Whisper will use it automatically.
+
+## Documentation
+
+Full guides and the auto-generated API reference live at
+**<https://syncalong.readthedocs.io/>**:
+
+- [Installation](https://syncalong.readthedocs.io/en/latest/installation/)
+- [CLI guide](https://syncalong.readthedocs.io/en/latest/cli/)
+- [Library guide](https://syncalong.readthedocs.io/en/latest/library/)
+- [How it works](https://syncalong.readthedocs.io/en/latest/how-it-works/)
+- [API reference](https://syncalong.readthedocs.io/en/latest/reference/)
+
+## Contributing
+
+Contributions are welcome. Install the dev tooling with
+`pip install -e ".[dev,docs]"` and make sure the quality gate passes before
+opening a PR:
+
+```bash
+pytest
+ruff check .
+black --check .
+pyright src
+```
+
+See the [contributing guide](https://syncalong.readthedocs.io/en/latest/contributing/)
+for the full workflow, including how releases are cut from git tags.
+
+## License
+
+Released under the [MIT License](LICENSE).

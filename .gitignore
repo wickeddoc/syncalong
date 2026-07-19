@@ -3,8 +3,12 @@ __pycache__/
 *.pyc
 *.egg-info/
 .pytest_cache/
+.ruff_cache/
 build/
 dist/
+
+# Docs build output (MkDocs)
+site/
 
 # Environments / editors
 .venv

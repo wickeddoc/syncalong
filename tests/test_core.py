@@ -8,35 +8,40 @@ Run with: python -m pytest tests/
 
 from __future__ import annotations
 
-import textwrap
 import tempfile
+import textwrap
 from pathlib import Path
 
 import pytest
 
-from syncalong.lyrics import parse_lyrics, parse_lyrics_text, lyrics_prompt, LyricLine
+from syncalong.align import _dp_align, _word_score, align_lyrics_to_transcript
+from syncalong.formatter import _seconds_to_lrc, format_lrc
+from syncalong.lyrics import LyricLine, lyrics_prompt, parse_lyrics, parse_lyrics_text
+from syncalong.pipeline import AlignmentResult, align, align_to_lrc
 from syncalong.textnorm import normalize
-from syncalong.transcribe import WordTimestamp, Transcriber, transcribe_audio, _build_transcribe_options
-from syncalong.align import align_lyrics_to_transcript, _dp_align, _word_score
-from syncalong.formatter import format_lrc, _seconds_to_lrc
-from syncalong.pipeline import align, align_to_lrc, AlignmentResult
-
+from syncalong.transcribe import (
+    Transcriber,
+    WordTimestamp,
+    _build_transcribe_options,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_lyrics_file(text: str) -> Path:
     """Write text to a temp file and return its path."""
-    tmp = tempfile.NamedTemporaryFile(
+    with tempfile.NamedTemporaryFile(
         mode="w", suffix=".txt", delete=False, encoding="utf-8"
-    )
-    tmp.write(textwrap.dedent(text))
-    tmp.close()
+    ) as tmp:
+        tmp.write(textwrap.dedent(text))
     return Path(tmp.name)
 
 
-def _make_transcript(words_and_times: list[tuple[str, float, float]]) -> list[WordTimestamp]:
+def _make_transcript(
+    words_and_times: list[tuple[str, float, float]],
+) -> list[WordTimestamp]:
     """Build a list of WordTimestamp from (word, start, end) tuples."""
     return [
         WordTimestamp(word=w.lower(), raw=w, start=s, end=e)
@@ -59,6 +64,7 @@ class _FakeModel:
 # ---------------------------------------------------------------------------
 # Lyrics parsing
 # ---------------------------------------------------------------------------
+
 
 class TestParseLyrics:
     def test_basic(self):
@@ -108,20 +114,21 @@ class TestParseLyrics:
 class TestParseLyricsText:
     def test_parses_text_without_a_file(self):
         lines = parse_lyrics_text("Hello world\nGoodbye moon\n")
-        assert [l.words for l in lines] == [["hello", "world"], ["goodbye", "moon"]]
+        assert [ln.words for ln in lines] == [["hello", "world"], ["goodbye", "moon"]]
         assert not lines[0].is_blank
 
     def test_matches_parse_lyrics_on_same_content(self):
         text = "[Chorus]\nLa la la\n\nDon’t stop\n"
         path = _make_lyrics_file(text)
-        from_file = [(l.raw, l.words, l.is_blank) for l in parse_lyrics(path)]
-        from_text = [(l.raw, l.words, l.is_blank) for l in parse_lyrics_text(text)]
+        from_file = [(ln.raw, ln.words, ln.is_blank) for ln in parse_lyrics(path)]
+        from_text = [(ln.raw, ln.words, ln.is_blank) for ln in parse_lyrics_text(text)]
         assert from_file == from_text
 
 
 # ---------------------------------------------------------------------------
 # Lyrics prompt for Whisper biasing
 # ---------------------------------------------------------------------------
+
 
 class TestLyricsPrompt:
     def test_joins_non_blank_lines_with_original_text(self):
@@ -147,6 +154,7 @@ class TestLyricsPrompt:
 # Whisper transcription options
 # ---------------------------------------------------------------------------
 
+
 class TestTranscribeOptions:
     def test_defaults_disable_conditioning(self):
         opts = _build_transcribe_options(language=None, initial_prompt=None)
@@ -162,6 +170,7 @@ class TestTranscribeOptions:
 
     def test_parser_accepts_all_whisper_model_names(self):
         from syncalong.cli import build_parser
+
         parser = build_parser()
         for model in ["turbo", "small.en", "large-v3", "base"]:
             args = parser.parse_args(["l.txt", "a.mp3", "-m", model])
@@ -169,23 +178,32 @@ class TestTranscribeOptions:
 
     def test_cli_flag_disables_lyrics_prompt(self):
         from syncalong.cli import build_parser
+
         parser = build_parser()
         assert parser.parse_args(["l.txt", "a.mp3"]).no_lyrics_prompt is False
-        assert parser.parse_args(
-            ["l.txt", "a.mp3", "--no-lyrics-prompt"]
-        ).no_lyrics_prompt is True
+        assert (
+            parser.parse_args(["l.txt", "a.mp3", "--no-lyrics-prompt"]).no_lyrics_prompt
+            is True
+        )
 
 
 # ---------------------------------------------------------------------------
 # Transcriber class
 # ---------------------------------------------------------------------------
 
+
 class TestTranscriber:
     def test_injected_model_extracts_words_and_forwards_options(self):
-        result = {"segments": [{"words": [
-            {"word": " Hello", "start": 1.0, "end": 1.5},
-            {"word": " world", "start": 2.0, "end": 2.5},
-        ]}]}
+        result = {
+            "segments": [
+                {
+                    "words": [
+                        {"word": " Hello", "start": 1.0, "end": 1.5},
+                        {"word": " world", "start": 2.0, "end": 2.5},
+                    ]
+                }
+            ]
+        }
         fake = _FakeModel(result)
         tx = Transcriber(model=fake)
         words = tx.transcribe(Path("song.mp3"), language="en", initial_prompt="hi")
@@ -207,12 +225,14 @@ class TestTranscriber:
     def test_model_name_retained_on_load_path(self, monkeypatch):
         import sys
         import types
+
         import syncalong.transcribe as tr
+
         fake = _FakeModel({"segments": []})
         fake_whisper = types.ModuleType("whisper")
         # setattr (not attribute assignment) keeps type checkers happy about
         # adding a member to a ModuleType instance.
-        setattr(fake_whisper, "load_model", lambda name: fake)
+        setattr(fake_whisper, "load_model", lambda name: fake)  # noqa: B010
         monkeypatch.setitem(sys.modules, "whisper", fake_whisper)
         tx = tr.Transcriber("medium")
         assert tx.model_name == "medium"
@@ -224,6 +244,7 @@ class TestTranscriber:
 
     def test_transcribe_audio_delegates_to_transcriber(self, monkeypatch):
         import syncalong.transcribe as tr
+
         captured = {}
 
         class FakeTranscriber:
@@ -247,6 +268,7 @@ class TestTranscriber:
 # Word scoring
 # ---------------------------------------------------------------------------
 
+
 class TestWordScore:
     def test_identical(self):
         assert _word_score("hello", "hello") == 100.0
@@ -264,35 +286,42 @@ class TestWordScore:
 # DP alignment
 # ---------------------------------------------------------------------------
 
+
 class TestDPAlign:
     def test_exact_match(self):
         lyric = ["hello", "beautiful", "world"]
-        transcript = _make_transcript([
-            ("hello", 1.0, 1.5),
-            ("beautiful", 2.0, 2.5),
-            ("world", 3.0, 3.5),
-        ])
+        transcript = _make_transcript(
+            [
+                ("hello", 1.0, 1.5),
+                ("beautiful", 2.0, 2.5),
+                ("world", 3.0, 3.5),
+            ]
+        )
         mapping = _dp_align(lyric, transcript, threshold=55.0)
         assert mapping == {0: 0, 1: 1, 2: 2}
 
     def test_extra_transcript_words(self):
         lyric = ["hello", "world"]
-        transcript = _make_transcript([
-            ("um", 0.5, 0.8),
-            ("hello", 1.0, 1.5),
-            ("uh", 1.8, 2.0),
-            ("world", 3.0, 3.5),
-        ])
+        transcript = _make_transcript(
+            [
+                ("um", 0.5, 0.8),
+                ("hello", 1.0, 1.5),
+                ("uh", 1.8, 2.0),
+                ("world", 3.0, 3.5),
+            ]
+        )
         mapping = _dp_align(lyric, transcript, threshold=55.0)
         assert mapping[0] == 1  # "hello" → transcript[1]
         assert mapping[1] == 3  # "world" → transcript[3]
 
     def test_fuzzy_match(self):
         lyric = ["running", "through"]
-        transcript = _make_transcript([
-            ("runnin", 1.0, 1.5),
-            ("through", 2.0, 2.5),
-        ])
+        transcript = _make_transcript(
+            [
+                ("runnin", 1.0, 1.5),
+                ("through", 2.0, 2.5),
+            ]
+        )
         mapping = _dp_align(lyric, transcript, threshold=55.0)
         assert 0 in mapping  # "running" ≈ "runnin"
         assert 1 in mapping
@@ -307,6 +336,7 @@ class TestDPAlign:
 # Full alignment pipeline
 # ---------------------------------------------------------------------------
 
+
 class TestAlignLyricsToTranscript:
     def test_repeated_chorus_does_not_cross_match(self):
         # The same line sung twice must map to two different points in the
@@ -314,11 +344,18 @@ class TestAlignLyricsToTranscript:
         # the first occurrence.
         path = _make_lyrics_file("la la la\nsomething else\nla la la\n")
         lines = parse_lyrics(path)
-        transcript = _make_transcript([
-            ("la", 1.0, 1.2), ("la", 1.3, 1.5), ("la", 1.6, 1.8),
-            ("something", 5.0, 5.5), ("else", 5.6, 6.0),
-            ("la", 10.0, 10.2), ("la", 10.3, 10.5), ("la", 10.6, 10.8),
-        ])
+        transcript = _make_transcript(
+            [
+                ("la", 1.0, 1.2),
+                ("la", 1.3, 1.5),
+                ("la", 1.6, 1.8),
+                ("something", 5.0, 5.5),
+                ("else", 5.6, 6.0),
+                ("la", 10.0, 10.2),
+                ("la", 10.3, 10.5),
+                ("la", 10.6, 10.8),
+            ]
+        )
         result = align_lyrics_to_transcript(lines, transcript)
         assert result[0][1] == 1.0
         assert result[1][1] == 5.0
@@ -327,22 +364,29 @@ class TestAlignLyricsToTranscript:
     def test_unmatched_line_gets_interpolated_timestamp(self):
         path = _make_lyrics_file("hello world\nxylophone zebra\ngoodbye moon\n")
         lines = parse_lyrics(path)
-        transcript = _make_transcript([
-            ("hello", 0.0, 0.5), ("world", 1.0, 1.5),
-            # "xylophone zebra" never appears in the transcript
-            ("goodbye", 10.0, 10.5), ("moon", 11.0, 11.5),
-        ])
+        transcript = _make_transcript(
+            [
+                ("hello", 0.0, 0.5),
+                ("world", 1.0, 1.5),
+                # "xylophone zebra" never appears in the transcript
+                ("goodbye", 10.0, 10.5),
+                ("moon", 11.0, 11.5),
+            ]
+        )
         result = align_lyrics_to_transcript(lines, transcript)
         assert result[1][1] == pytest.approx(5.0)  # midpoint of 0.0 and 10.0
 
     def test_lines_before_first_match_are_extrapolated(self):
         path = _make_lyrics_file("xylophone zebra\nhello world\n")
         lines = parse_lyrics(path)
-        transcript = _make_transcript([
-            # Unmatched audio before the first matched lyric line
-            ("blah", 2.0, 2.5),
-            ("hello", 6.0, 6.5), ("world", 7.0, 7.5),
-        ])
+        transcript = _make_transcript(
+            [
+                # Unmatched audio before the first matched lyric line
+                ("blah", 2.0, 2.5),
+                ("hello", 6.0, 6.5),
+                ("world", 7.0, 7.5),
+            ]
+        )
         result = align_lyrics_to_transcript(lines, transcript)
         # Halfway between transcript start (2.0) and the first anchor (6.0)
         assert result[0][1] == pytest.approx(4.0)
@@ -351,10 +395,13 @@ class TestAlignLyricsToTranscript:
     def test_lines_after_last_match_are_extrapolated(self):
         path = _make_lyrics_file("hello world\nxylophone zebra\n")
         lines = parse_lyrics(path)
-        transcript = _make_transcript([
-            ("hello", 1.0, 1.5), ("world", 2.0, 2.5),
-            ("blah", 9.5, 10.0),
-        ])
+        transcript = _make_transcript(
+            [
+                ("hello", 1.0, 1.5),
+                ("world", 2.0, 2.5),
+                ("blah", 9.5, 10.0),
+            ]
+        )
         result = align_lyrics_to_transcript(lines, transcript)
         assert result[0][1] == 1.0
         # Halfway between the last anchor (1.0) and transcript end (10.0)
@@ -370,21 +417,24 @@ class TestAlignLyricsToTranscript:
     def test_simple_two_lines(self):
         path = _make_lyrics_file("hello world\ngoodbye moon\n")
         lines = parse_lyrics(path)
-        transcript = _make_transcript([
-            ("hello", 1.0, 1.5),
-            ("world", 2.0, 2.5),
-            ("goodbye", 4.0, 4.5),
-            ("moon", 5.0, 5.5),
-        ])
+        transcript = _make_transcript(
+            [
+                ("hello", 1.0, 1.5),
+                ("world", 2.0, 2.5),
+                ("goodbye", 4.0, 4.5),
+                ("moon", 5.0, 5.5),
+            ]
+        )
         result = align_lyrics_to_transcript(lines, transcript)
         assert len(result) == 2
-        assert result[0][1] == 1.0   # First line starts at "hello"
-        assert result[1][1] == 4.0   # Second line starts at "goodbye"
+        assert result[0][1] == 1.0  # First line starts at "hello"
+        assert result[1][1] == 4.0  # Second line starts at "goodbye"
 
 
 # ---------------------------------------------------------------------------
 # Vocal separation (demucs faked — real runs need the optional extra)
 # ---------------------------------------------------------------------------
+
 
 class TestVocalSeparator:
     def _fake_run(self, returncode=0, make_vocals=True):
@@ -408,7 +458,8 @@ class TestVocalSeparator:
 
         registered = []
         monkeypatch.setattr(
-            vs.atexit, "register",
+            vs.atexit,
+            "register",
             lambda fn, *a, **kw: registered.append((fn, a, kw)),
         )
         fake_run, calls = self._fake_run()
@@ -444,14 +495,17 @@ class TestVocalSeparator:
 # CLI vocal-separation guard
 # ---------------------------------------------------------------------------
 
+
 class TestResolveAudioPath:
     def test_passthrough_without_separation(self):
         from syncalong import cli
+
         audio = Path("song.mp3")
         assert cli.resolve_audio_path(audio, separate_vocals=False) is audio
 
     def test_missing_demucs_exits_with_install_hint(self, monkeypatch, capsys):
         from syncalong import cli
+
         monkeypatch.setattr(cli, "_demucs_available", lambda: False)
         with pytest.raises(SystemExit):
             cli.resolve_audio_path(Path("song.mp3"), separate_vocals=True)
@@ -462,6 +516,7 @@ class TestResolveAudioPath:
 # ---------------------------------------------------------------------------
 # LRC formatting
 # ---------------------------------------------------------------------------
+
 
 class TestLRCFormatter:
     def test_seconds_to_lrc(self):
@@ -477,7 +532,7 @@ class TestLRCFormatter:
     def test_format_lrc(self):
         line1 = LyricLine(index=0, raw="Hello world", words=["hello", "world"])
         line2 = LyricLine(index=1, raw="Goodbye moon", words=["goodbye", "moon"])
-        timed = [(line1, 1.0), (line2, 4.5)]
+        timed: list[tuple[LyricLine, float | None]] = [(line1, 1.0), (line2, 4.5)]
         lrc = format_lrc(timed)
         assert "[00:01.00] Hello world" in lrc
         assert "[00:04.50] Goodbye moon" in lrc
@@ -493,19 +548,29 @@ class TestLRCFormatter:
 # High-level pipeline facade
 # ---------------------------------------------------------------------------
 
+
 class TestAlignFacade:
     def _fake_transcriber(self):
-        result = {"segments": [{"words": [
-            {"word": " hello", "start": 1.0, "end": 1.5},
-            {"word": " world", "start": 2.0, "end": 2.5},
-            {"word": " goodbye", "start": 4.0, "end": 4.5},
-            {"word": " moon", "start": 5.0, "end": 5.5},
-        ]}]}
+        result = {
+            "segments": [
+                {
+                    "words": [
+                        {"word": " hello", "start": 1.0, "end": 1.5},
+                        {"word": " world", "start": 2.0, "end": 2.5},
+                        {"word": " goodbye", "start": 4.0, "end": 4.5},
+                        {"word": " moon", "start": 5.0, "end": 5.5},
+                    ]
+                }
+            ]
+        }
         return Transcriber(model=_FakeModel(result))
 
     def test_returns_result_with_counts_and_lrc(self):
-        res = align("hello world\ngoodbye moon\n", "song.mp3",
-                    transcriber=self._fake_transcriber())
+        res = align(
+            "hello world\ngoodbye moon\n",
+            "song.mp3",
+            transcriber=self._fake_transcriber(),
+        )
         assert isinstance(res, AlignmentResult)
         assert (res.matched, res.total) == (2, 2)
         assert [ts for _, ts in res.timed_lines] == [1.0, 4.0]
@@ -516,7 +581,11 @@ class TestAlignFacade:
         p.write_text("hello world\ngoodbye moon\n", encoding="utf-8")
         lines = parse_lyrics_text("hello world\ngoodbye moon\n")
         results = [
-            align("hello world\ngoodbye moon\n", "s.mp3", transcriber=self._fake_transcriber()),
+            align(
+                "hello world\ngoodbye moon\n",
+                "s.mp3",
+                transcriber=self._fake_transcriber(),
+            ),
             align(p, "s.mp3", transcriber=self._fake_transcriber()),
             align(lines, "s.mp3", transcriber=self._fake_transcriber()),
         ]
@@ -531,13 +600,21 @@ class TestAlignFacade:
 
     def test_use_lyrics_prompt_toggles_prompt(self):
         fake_on = _FakeModel({"segments": []})
-        align("hello world\n", "s.mp3", transcriber=Transcriber(model=fake_on),
-              use_lyrics_prompt=True)
+        align(
+            "hello world\n",
+            "s.mp3",
+            transcriber=Transcriber(model=fake_on),
+            use_lyrics_prompt=True,
+        )
         assert fake_on.calls[0][1].get("initial_prompt") == "hello world"
 
         fake_off = _FakeModel({"segments": []})
-        align("hello world\n", "s.mp3", transcriber=Transcriber(model=fake_off),
-              use_lyrics_prompt=False)
+        align(
+            "hello world\n",
+            "s.mp3",
+            transcriber=Transcriber(model=fake_off),
+            use_lyrics_prompt=False,
+        )
         assert "initial_prompt" not in fake_off.calls[0][1]
 
     def test_rejects_bad_lyrics_type(self):
@@ -547,20 +624,35 @@ class TestAlignFacade:
 
     def test_separate_vocals_without_demucs_raises(self, monkeypatch):
         import importlib.util
+
         monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)
         with pytest.raises(ModuleNotFoundError):
-            align("hello world\n", "s.mp3",
-                  transcriber=self._fake_transcriber(), separate_vocals=True)
+            align(
+                "hello world\n",
+                "s.mp3",
+                transcriber=self._fake_transcriber(),
+                separate_vocals=True,
+            )
 
 
 class TestPublicAPI:
     def test_top_level_exports_present(self):
         import syncalong
+
         for name in [
-            "align", "align_to_lrc", "AlignmentResult", "Transcriber",
-            "transcribe_audio", "WordTimestamp", "parse_lyrics",
-            "parse_lyrics_text", "lyrics_prompt", "LyricLine",
-            "align_lyrics_to_transcript", "format_lrc", "separate",
+            "align",
+            "align_to_lrc",
+            "AlignmentResult",
+            "Transcriber",
+            "transcribe_audio",
+            "WordTimestamp",
+            "parse_lyrics",
+            "parse_lyrics_text",
+            "lyrics_prompt",
+            "LyricLine",
+            "align_lyrics_to_transcript",
+            "format_lrc",
+            "separate",
             "__version__",
         ]:
             assert name in syncalong.__all__, f"{name} missing from __all__"
@@ -569,9 +661,13 @@ class TestPublicAPI:
     def test_importing_syncalong_does_not_load_whisper(self):
         import subprocess
         import sys
+
         subprocess.run(
-            [sys.executable, "-c",
-             "import syncalong, sys; assert 'whisper' not in sys.modules"],
+            [
+                sys.executable,
+                "-c",
+                "import syncalong, sys; assert 'whisper' not in sys.modules",
+            ],
             check=True,
         )
 
@@ -579,6 +675,8 @@ class TestPublicAPI:
 class TestPackaging:
     def test_py_typed_marker_present(self):
         import pathlib
+
         import syncalong
+
         marker = pathlib.Path(syncalong.__file__).parent / "py.typed"
         assert marker.is_file()
