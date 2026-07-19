@@ -2,7 +2,7 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/syncalong.svg)](https://pypi.org/project/syncalong/)
 [![Python versions](https://img.shields.io/pypi/pyversions/syncalong.svg)](https://pypi.org/project/syncalong/)
-[![Documentation](https://img.shields.io/readthedocs/syncalong)](https://syncalong.readthedocs.io/)
+[![Documentation](https://readthedocs.org/projects/syncalong/badge/?version=latest)](https://syncalong.readthedocs.io/en/latest/)
 [![CI](https://github.com/wickeddoc/syncalong/actions/workflows/ci.yml/badge.svg)](https://github.com/wickeddoc/syncalong/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
