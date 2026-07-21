@@ -18,6 +18,7 @@ from syncalong.lyrics import (
     parse_lyrics_text,
 )
 from syncalong.pipeline import AlignmentResult, align, align_to_lrc
+from syncalong.remote import RemoteTranscriber
 from syncalong.transcribe import Transcriber, WordTimestamp, transcribe_audio
 from syncalong.vocal_separator import separate
 
@@ -34,6 +35,7 @@ __all__ = [
     "AlignmentResult",
     # Transcription
     "Transcriber",
+    "RemoteTranscriber",
     "transcribe_audio",
     "WordTimestamp",
     # Lyrics

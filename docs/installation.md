@@ -24,15 +24,27 @@ automatically and cached (typically under `~/.cache/whisper`).
 pip install syncalong
 ```
 
-This installs the library, the `syncalong` command-line tool, and the core
-dependencies ([openai-whisper](https://github.com/openai/whisper) and
-[rapidfuzz](https://github.com/rapidfuzz/RapidFuzz)).
+This installs the library and the `syncalong` CLI with a **thin** dependency
+set ([rapidfuzz](https://github.com/rapidfuzz/RapidFuzz) only) — enough to
+parse lyrics, align a transcript, write LRC, and talk to a remote server.
+
+## Local transcription (Whisper)
+
+To transcribe **on this machine**, add the `whisper` extra:
+
+```bash
+pip install "syncalong[whisper]"
+```
 
 !!! info "Whisper pulls in PyTorch"
-    `openai-whisper` depends on PyTorch, which is a large download. If you have a
-    CUDA-capable GPU, install a matching PyTorch build first (see the
+    `openai-whisper` depends on PyTorch, a large download. With a CUDA-capable
+    GPU, install a matching PyTorch build first (see the
     [PyTorch install guide](https://pytorch.org/get-started/locally/)) and
     Whisper will use the GPU automatically.
+
+!!! tip "No GPU on this machine?"
+    Run transcription on a separate GPU box instead — see
+    [Remote transcription](remote.md). The client stays torch-free.
 
 ## Optional: vocal separation
 

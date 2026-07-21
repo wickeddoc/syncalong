@@ -27,6 +27,11 @@ sequence alignment to map those words back onto your lyrics.
 pip install syncalong
 ```
 
+This installs a thin, torch-free client (lyrics parsing, alignment, LRC
+output). Local transcription needs the `whisper` extra:
+`pip install "syncalong[whisper]"`. To transcribe on a separate GPU server
+instead, see [Remote transcription](#remote-transcription-no-local-gpu) below.
+
 Or from a checkout, in editable / development mode:
 
 ```bash
@@ -44,6 +49,21 @@ pip install "syncalong[vocal-separation]"
 
 This adds [Demucs](https://github.com/facebookresearch/demucs), which
 isolates the vocal track before transcription.
+
+### Remote transcription (no local GPU)
+
+Run Whisper on a GPU machine and keep the audio + lyrics on a thin client:
+
+```bash
+# on the GPU box
+pip install "syncalong[server]"
+syncalong-serve --model medium --host 0.0.0.0 --device cuda
+
+# on the client (torch-free `pip install syncalong`)
+syncalong lyrics.txt song.mp3 --server http://gpu-box:8000 > song.lrc
+```
+
+See the [remote transcription guide](https://syncalong.readthedocs.io/en/latest/remote/).
 
 ## Usage
 

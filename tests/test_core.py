@@ -875,6 +875,7 @@ class TestPublicAPI:
             "align_to_lrc",
             "AlignmentResult",
             "Transcriber",
+            "RemoteTranscriber",
             "transcribe_audio",
             "WordTimestamp",
             "parse_lyrics",
@@ -897,7 +898,9 @@ class TestPublicAPI:
             [
                 sys.executable,
                 "-c",
-                "import syncalong, sys; assert 'whisper' not in sys.modules",
+                "import syncalong, sys; "
+                "assert 'whisper' not in sys.modules; "
+                "assert 'fastapi' not in sys.modules",
             ],
             check=True,
         )
