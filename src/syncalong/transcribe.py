@@ -25,6 +25,36 @@ class WordTimestamp:
     start: float
     end: float
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a JSON-friendly dict for the transcription wire format.
+
+        Returns:
+            A mapping with ``word``, ``raw``, ``start``, and ``end`` keys.
+        """
+        return {
+            "word": self.word,
+            "raw": self.raw,
+            "start": self.start,
+            "end": self.end,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> WordTimestamp:
+        """Rebuild a :class:`WordTimestamp` from its serialized form.
+
+        Args:
+            data: A mapping with ``word``, ``raw``, ``start``, ``end`` keys.
+
+        Returns:
+            The reconstructed :class:`WordTimestamp`.
+        """
+        return cls(
+            word=data["word"],
+            raw=data["raw"],
+            start=float(data["start"]),
+            end=float(data["end"]),
+        )
+
 
 def _build_transcribe_options(
     *,

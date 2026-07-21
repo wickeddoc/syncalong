@@ -265,6 +265,27 @@ class TestTranscriber:
 
 
 # ---------------------------------------------------------------------------
+# WordTimestamp wire (de)serialization
+# ---------------------------------------------------------------------------
+
+
+class TestWordTimestampWire:
+    def test_to_dict_shape(self):
+        w = WordTimestamp(word="hi", raw="Hi", start=1.0, end=1.5)
+        assert w.to_dict() == {"word": "hi", "raw": "Hi", "start": 1.0, "end": 1.5}
+
+    def test_from_dict_rebuilds(self):
+        d = {"word": "hi", "raw": "Hi", "start": "1.0", "end": "1.5"}
+        w = WordTimestamp.from_dict(d)
+        assert w == WordTimestamp(word="hi", raw="Hi", start=1.0, end=1.5)
+        assert isinstance(w.start, float) and isinstance(w.end, float)
+
+    def test_roundtrip(self):
+        w = WordTimestamp(word="x", raw="X", start=0.25, end=0.75)
+        assert WordTimestamp.from_dict(w.to_dict()) == w
+
+
+# ---------------------------------------------------------------------------
 # Word scoring
 # ---------------------------------------------------------------------------
 
