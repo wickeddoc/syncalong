@@ -53,6 +53,15 @@ def _encode_multipart(
 
 
 def _error_detail(exc: urllib.error.HTTPError) -> str:
+    """Extract a server-provided error message from an HTTP error.
+
+    Args:
+        exc: The HTTP error raised by ``urlopen``.
+
+    Returns:
+        The server's ``detail`` string when the body is JSON with that key,
+        otherwise the raw body text or the HTTP reason phrase.
+    """
     try:
         text = exc.read().decode("utf-8")
     except Exception:

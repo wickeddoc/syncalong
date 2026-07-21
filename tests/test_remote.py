@@ -60,6 +60,7 @@ class TestRemoteTranscriber:
         assert 'name="language"' in body and "en" in body
         assert 'name="separate_vocals"' in body and "true" in body
         assert 'filename="song.mp3"' in body
+        assert capture["timeout"] == 300.0  # default timeout forwarded to urlopen
 
     def test_sends_bearer_token(self, tmp_path, monkeypatch):
         audio = tmp_path / "s.mp3"
@@ -70,6 +71,22 @@ class TestRemoteTranscriber:
         RemoteTranscriber("http://gpu:8000", token="secret").transcribe(audio)
 
         assert capture["request"].headers["Authorization"] == "Bearer secret"
+
+    def test_omits_none_fields_from_body(self, tmp_path, monkeypatch):
+        audio = tmp_path / "s.mp3"
+        audio.write_bytes(b"\x00")
+        capture = {}
+        _patch_urlopen(monkeypatch, {"words": []}, capture)
+
+        # language and initial_prompt default to None
+        RemoteTranscriber("http://gpu:8000").transcribe(audio)
+
+        body = capture["request"].data.decode("latin-1")
+        assert 'name="language"' not in body
+        assert 'name="initial_prompt"' not in body
+        # a non-None field is still present, and "None" is never serialized
+        assert 'name="separate_vocals"' in body and "false" in body
+        assert "None" not in body
 
     def test_http_error_becomes_runtimeerror(self, tmp_path, monkeypatch):
         audio = tmp_path / "s.mp3"
@@ -85,8 +102,11 @@ class TestRemoteTranscriber:
             )
 
         monkeypatch.setattr(remote.urllib.request, "urlopen", raise_http)
-        with pytest.raises(RuntimeError, match="HTTP 401"):
+        with pytest.raises(RuntimeError) as excinfo:
             RemoteTranscriber("http://gpu:8000").transcribe(audio)
+        message = str(excinfo.value)
+        assert "HTTP 401" in message
+        assert "invalid or missing token" in message  # server-provided detail
 
     def test_unreachable_becomes_runtimeerror(self, tmp_path, monkeypatch):
         audio = tmp_path / "s.mp3"
@@ -96,5 +116,9 @@ class TestRemoteTranscriber:
             raise urllib.error.URLError("connection refused")
 
         monkeypatch.setattr(remote.urllib.request, "urlopen", raise_url)
-        with pytest.raises(RuntimeError, match="could not reach"):
+        with pytest.raises(RuntimeError) as excinfo:
             RemoteTranscriber("http://gpu:8000").transcribe(audio)
+        message = str(excinfo.value)
+        assert "could not reach" in message
+        assert "http://gpu:8000/transcribe" in message  # names the target URL
+        assert "connection refused" in message  # includes the underlying reason
