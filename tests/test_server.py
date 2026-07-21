@@ -81,6 +81,14 @@ class TestAuth:
         )
         assert resp.status_code == 200
 
+    def test_wrong_token_rejected(self):
+        resp = _client(token="secret").post(
+            "/transcribe",
+            files={"audio": ("s.mp3", b"\x00")},
+            headers={"Authorization": "Bearer wrong"},
+        )
+        assert resp.status_code == 401
+
     def test_no_token_configured_allows_all(self):
         resp = _client().post("/transcribe", files={"audio": ("s.mp3", b"\x00")})
         assert resp.status_code == 200

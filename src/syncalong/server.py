@@ -61,7 +61,9 @@ def create_app(
         if not configured:
             return
         expected = f"Bearer {configured}"
-        if authorization is None or not hmac.compare_digest(authorization, expected):
+        if authorization is None or not hmac.compare_digest(
+            authorization.encode("utf-8"), expected.encode("utf-8")
+        ):
             raise HTTPException(status_code=401, detail="invalid or missing token")
 
     @app.get("/health")
