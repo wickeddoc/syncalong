@@ -713,6 +713,26 @@ class TestAlignFacade:
                 separate_vocals=True,
             )
 
+    def test_forwards_separate_vocals_to_transcriber(self):
+        captured = {}
+
+        class RecordingTranscriber:
+            def transcribe(
+                self,
+                audio_path,
+                *,
+                language=None,
+                initial_prompt=None,
+                separate_vocals=False,
+            ):
+                captured["separate_vocals"] = separate_vocals
+                return [WordTimestamp("hello", "hello", 1.0, 1.5)]
+
+        align(
+            "hello\n", "s.mp3", transcriber=RecordingTranscriber(), separate_vocals=True
+        )
+        assert captured["separate_vocals"] is True
+
 
 class TestPublicAPI:
     def test_top_level_exports_present(self):
