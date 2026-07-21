@@ -592,6 +592,138 @@ class TestResolveAudioPath:
         assert "vocal-separation" in err
 
 
+class TestCliRemote:
+    def _lyrics_and_audio(self, tmp_path):
+        lyr = tmp_path / "l.txt"
+        lyr.write_text("hello world\ngoodbye moon\n", encoding="utf-8")
+        aud = tmp_path / "a.mp3"
+        aud.write_bytes(b"\x00")
+        return lyr, aud
+
+    def test_server_flag_uses_remote_transcriber(self, tmp_path, monkeypatch):
+        import syncalong.remote as remote
+        from syncalong import cli
+
+        lyr, aud = self._lyrics_and_audio(tmp_path)
+        captured = {}
+
+        class FakeRemote:
+            def __init__(self, base_url, *, token=None, timeout=300.0):
+                captured["base_url"] = base_url
+                captured["token"] = token
+
+            def transcribe(
+                self,
+                audio_path,
+                *,
+                language=None,
+                initial_prompt=None,
+                separate_vocals=False,
+            ):
+                captured["separate_vocals"] = separate_vocals
+                return [
+                    WordTimestamp("hello", "hello", 1.0, 1.5),
+                    WordTimestamp("world", "world", 2.0, 2.5),
+                    WordTimestamp("goodbye", "goodbye", 4.0, 4.5),
+                    WordTimestamp("moon", "moon", 5.0, 5.5),
+                ]
+
+        monkeypatch.setattr(remote, "RemoteTranscriber", FakeRemote)
+        cli.main(
+            [
+                str(lyr),
+                str(aud),
+                "--server",
+                "http://gpu:8000",
+                "--token",
+                "t",
+                "--separate-vocals",
+            ]
+        )
+        assert captured["base_url"] == "http://gpu:8000"
+        assert captured["token"] == "t"
+        assert captured["separate_vocals"] is True
+
+    def test_server_from_env(self, tmp_path, monkeypatch):
+        import syncalong.remote as remote
+        from syncalong import cli
+
+        lyr, aud = self._lyrics_and_audio(tmp_path)
+        captured = {}
+
+        class FakeRemote:
+            def __init__(self, base_url, *, token=None, timeout=300.0):
+                captured["base_url"] = base_url
+
+            def transcribe(self, *a, **k):
+                return [WordTimestamp("hello", "hello", 1.0, 1.5)]
+
+        monkeypatch.setattr(remote, "RemoteTranscriber", FakeRemote)
+        monkeypatch.setenv("SYNCALONG_SERVER", "http://env:9000")
+        cli.main([str(lyr), str(aud)])
+        assert captured["base_url"] == "http://env:9000"
+
+    def test_local_without_whisper_shows_hint(self, tmp_path, monkeypatch, capsys):
+        from syncalong import cli
+
+        lyr, aud = self._lyrics_and_audio(tmp_path)
+        monkeypatch.delenv("SYNCALONG_SERVER", raising=False)
+        monkeypatch.setattr(cli, "_whisper_available", lambda: False)
+        with pytest.raises(SystemExit):
+            cli.main([str(lyr), str(aud)])
+        assert "syncalong[whisper]" in capsys.readouterr().err
+
+
+class TestServeMain:
+    def test_builds_app_and_runs_uvicorn(self, monkeypatch):
+        import uvicorn
+
+        import syncalong.server as server
+        import syncalong.transcribe as tr
+        from syncalong import cli
+
+        recorded = {}
+
+        class FakeTranscriber:
+            def __init__(self, model_name="base", *, device=None):
+                recorded["model"] = model_name
+                recorded["device"] = device
+
+        monkeypatch.setattr(tr, "Transcriber", FakeTranscriber)
+
+        fake_app = object()
+
+        def fake_create_app(transcriber, *, token=None, allow_vocal_separation=True):
+            recorded["token"] = token
+            recorded["allow_sep"] = allow_vocal_separation
+            return fake_app
+
+        monkeypatch.setattr(server, "create_app", fake_create_app)
+
+        def fake_run(app, host=None, port=None):
+            recorded["run"] = (app, host, port)
+
+        monkeypatch.setattr(uvicorn, "run", fake_run)
+
+        cli.serve_main(
+            [
+                "-m",
+                "small",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                "9000",
+                "--token",
+                "sek",
+                "--no-vocal-separation",
+            ]
+        )
+        assert recorded["model"] == "small"
+        assert recorded["token"] == "sek"
+        assert recorded["allow_sep"] is False
+        assert recorded["run"] == (fake_app, "0.0.0.0", 9000)
+
+
 # ---------------------------------------------------------------------------
 # LRC formatting
 # ---------------------------------------------------------------------------

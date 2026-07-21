@@ -78,6 +78,7 @@ Changelog = "https://github.com/wickeddoc/syncalong/blob/master/CHANGELOG.md"
 
 [project.scripts]
 syncalong = "syncalong.cli:main"
+syncalong-serve = "syncalong.cli:serve_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
