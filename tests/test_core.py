@@ -251,8 +251,20 @@ class TestTranscriber:
             def __init__(self, model_name="base", *, model=None):
                 captured["model_name"] = model_name
 
-            def transcribe(self, audio_path, *, language=None, initial_prompt=None):
-                captured["args"] = (audio_path, language, initial_prompt)
+            def transcribe(
+                self,
+                audio_path,
+                *,
+                language=None,
+                initial_prompt=None,
+                separate_vocals=False,
+            ):
+                captured["args"] = (
+                    audio_path,
+                    language,
+                    initial_prompt,
+                    separate_vocals,
+                )
                 return [WordTimestamp("hi", "hi", 0.0, 0.5)]
 
         monkeypatch.setattr(tr, "Transcriber", FakeTranscriber)
@@ -260,8 +272,54 @@ class TestTranscriber:
             Path("s.mp3"), model_name="small", language="de", initial_prompt="x"
         )
         assert captured["model_name"] == "small"
-        assert captured["args"] == (Path("s.mp3"), "de", "x")
+        assert captured["args"] == (Path("s.mp3"), "de", "x", False)
         assert words[0].word == "hi"
+
+    def test_device_forwarded_to_load_model(self, monkeypatch):
+        import sys
+        import types
+
+        import syncalong.transcribe as tr
+
+        captured = {}
+        fake = _FakeModel({"segments": []})
+        fake_whisper = types.ModuleType("whisper")
+
+        def load_model(name, device=None):
+            captured["name"] = name
+            captured["device"] = device
+            return fake
+
+        setattr(fake_whisper, "load_model", load_model)  # noqa: B010
+        monkeypatch.setitem(sys.modules, "whisper", fake_whisper)
+        tr.Transcriber("small", device="cuda")
+        assert captured == {"name": "small", "device": "cuda"}
+
+    def test_separate_vocals_missing_demucs_raises(self, monkeypatch):
+        import importlib.util
+
+        monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)
+        tx = Transcriber(model=_FakeModel({"segments": []}))
+        with pytest.raises(ModuleNotFoundError):
+            tx.transcribe(Path("song.mp3"), separate_vocals=True)
+
+    def test_separate_vocals_runs_demucs_then_transcribes(self, monkeypatch):
+        import importlib.util
+
+        import syncalong.transcribe as tr
+
+        monkeypatch.setattr(
+            importlib.util, "find_spec", lambda name: object()
+        )  # pretend demucs is installed
+        fake_vs = __import__("types").ModuleType("syncalong.vocal_separator")
+        setattr(fake_vs, "separate", lambda p: Path("/tmp/vocals.wav"))  # noqa: B010
+        monkeypatch.setitem(
+            __import__("sys").modules, "syncalong.vocal_separator", fake_vs
+        )
+        fake = _FakeModel({"segments": []})
+        tx = tr.Transcriber(model=fake)
+        tx.transcribe(Path("song.mp3"), separate_vocals=True)
+        assert fake.calls[0][0] == "/tmp/vocals.wav"  # transcribed the vocals path
 
 
 # ---------------------------------------------------------------------------
