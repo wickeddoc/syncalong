@@ -204,7 +204,6 @@ def main(argv: list[str] | None = None) -> None:
             print(f"ERROR: {exc}", file=sys.stderr)
             sys.exit(1)
     else:
-        audio_path = resolve_audio_path(args.audio, args.separate_vocals)
         if not _whisper_available():
             print(
                 "ERROR: local transcription requires Whisper.\n"
@@ -213,6 +212,7 @@ def main(argv: list[str] | None = None) -> None:
                 file=sys.stderr,
             )
             sys.exit(1)
+        audio_path = resolve_audio_path(args.audio, args.separate_vocals)
         print(
             f"Transcribing with Whisper ({args.model}) …  "
             "(this may take a while on CPU)",

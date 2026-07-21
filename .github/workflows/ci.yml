@@ -25,12 +25,14 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
       - name: Install tools
-        # No package install: ruff/black lint the tree directly and pyright
-        # reads the source under src/ (rapidfuzz is the only third-party import
-        # it needs to resolve; the lazy `import whisper` carries a type ignore).
+        # No package install: ruff/black lint the tree directly, and pyright
+        # reads the source under src/, so it must resolve every third-party
+        # import there: rapidfuzz, fastapi (server.py), and uvicorn (cli.py's
+        # serve_main). The lazy `import whisper` carries a type ignore, so
+        # torch is still NOT installed here (CI stays torch-free).
         run: |
           python -m pip install --upgrade pip
-          pip install ruff black pyright rapidfuzz
+          pip install ruff black pyright rapidfuzz fastapi uvicorn
       - name: Ruff (lint)
         run: ruff check .
       - name: Black (format check)
@@ -61,7 +63,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install --no-deps -e .
-          pip install rapidfuzz pytest fastapi httpx python-multipart
+          pip install rapidfuzz pytest fastapi httpx python-multipart uvicorn
       - name: Run tests
         run: pytest -ra
 

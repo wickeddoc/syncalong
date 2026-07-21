@@ -18,8 +18,11 @@ sequence alignment to map those words back onto your lyrics.
 ## Prerequisites
 
 - **Python 3.9+**
-- **ffmpeg** — required by Whisper for audio decoding.
+- **ffmpeg** — must be installed wherever Whisper actually runs: the local
+  machine, if using the `whisper` extra, or the GPU `server` box.
   Install via your package manager (`apt install ffmpeg`, `brew install ffmpeg`, etc.)
+  A thin client that only talks to a remote server (`--server` / `RemoteTranscriber`)
+  needs neither ffmpeg nor Whisper.
 
 ## Installation
 
@@ -112,6 +115,8 @@ syncalong lied.txt lied.mp3 -l de
 | `--separate-vocals` | Run Demucs to isolate vocals before transcription. | off |
 | `--no-lyrics-prompt` | Don't feed the lyrics to Whisper as a decoding prompt. | off |
 | `--threshold` | Minimum fuzzy-match score (0–100) to accept a word alignment. | 55 |
+| `--server` | Transcribe on a remote syncalong server instead of locally; falls back to `$SYNCALONG_SERVER`. | local |
+| `--token` | Bearer token for the remote server; falls back to `$SYNCALONG_TOKEN`. | none |
 
 ### Lyrics file format
 
@@ -242,6 +247,7 @@ Full guides and the auto-generated API reference live at
 - [CLI guide](https://syncalong.readthedocs.io/en/latest/cli/)
 - [Library guide](https://syncalong.readthedocs.io/en/latest/library/)
 - [How it works](https://syncalong.readthedocs.io/en/latest/how-it-works/)
+- [Remote transcription (server/client)](https://syncalong.readthedocs.io/en/latest/remote/)
 - [API reference](https://syncalong.readthedocs.io/en/latest/reference/)
 
 ## Contributing

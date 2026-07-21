@@ -3,8 +3,9 @@
 ## Requirements
 
 - **Python 3.9 or newer**
-- **[ffmpeg](https://ffmpeg.org/)** — required by Whisper to decode audio. It is
-  a system package, not a Python one:
+- **[ffmpeg](https://ffmpeg.org/)** — must be installed wherever Whisper
+  actually runs: the local machine, if using the `whisper` extra, or the GPU
+  `server` box. It is a system package, not a Python one:
 
     ```bash
     # Debian/Ubuntu
@@ -14,6 +15,9 @@
     # Windows (winget)
     winget install ffmpeg
     ```
+
+    A thin client that only talks to a remote server (`--server` /
+    `RemoteTranscriber`) needs neither ffmpeg nor Whisper installed locally.
 
 The first time you run a given Whisper model, its weights are downloaded
 automatically and cached (typically under `~/.cache/whisper`).
