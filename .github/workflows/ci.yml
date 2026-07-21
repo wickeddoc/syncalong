@@ -56,11 +56,12 @@ jobs:
           cache-dependency-path: pyproject.toml
       - name: Install package (without heavy Whisper/torch)
         # The suite injects a fake Whisper model and never loads torch, so we
-        # skip the package's heavy runtime deps and install only what it needs.
+        # skip the package's heavy runtime deps. Server tests additionally need
+        # fastapi, httpx, and python-multipart (all torch-free).
         run: |
           python -m pip install --upgrade pip
           pip install --no-deps -e .
-          pip install rapidfuzz pytest
+          pip install rapidfuzz pytest fastapi httpx python-multipart
       - name: Run tests
         run: pytest -ra
 
