@@ -18,14 +18,22 @@ sequence alignment to map those words back onto your lyrics.
 ## Prerequisites
 
 - **Python 3.9+**
-- **ffmpeg** — required by Whisper for audio decoding.
+- **ffmpeg** — must be installed wherever Whisper actually runs: the local
+  machine, if using the `whisper` extra, or the GPU `server` box.
   Install via your package manager (`apt install ffmpeg`, `brew install ffmpeg`, etc.)
+  A thin client that only talks to a remote server (`--server` / `RemoteTranscriber`)
+  needs neither ffmpeg nor Whisper.
 
 ## Installation
 
 ```bash
 pip install syncalong
 ```
+
+This installs a thin, torch-free client (lyrics parsing, alignment, LRC
+output). Local transcription needs the `whisper` extra:
+`pip install "syncalong[whisper]"`. To transcribe on a separate GPU server
+instead, see [Remote transcription](#remote-transcription-no-local-gpu) below.
 
 Or from a checkout, in editable / development mode:
 
@@ -44,6 +52,21 @@ pip install "syncalong[vocal-separation]"
 
 This adds [Demucs](https://github.com/facebookresearch/demucs), which
 isolates the vocal track before transcription.
+
+### Remote transcription (no local GPU)
+
+Run Whisper on a GPU machine and keep the audio + lyrics on a thin client:
+
+```bash
+# on the GPU box
+pip install "syncalong[server]"
+syncalong-serve --model medium --host 0.0.0.0 --device cuda
+
+# on the client (torch-free `pip install syncalong`)
+syncalong lyrics.txt song.mp3 --server http://gpu-box:8000 > song.lrc
+```
+
+See the [remote transcription guide](https://syncalong.readthedocs.io/en/latest/remote/).
 
 ## Usage
 
@@ -92,6 +115,8 @@ syncalong lied.txt lied.mp3 -l de
 | `--separate-vocals` | Run Demucs to isolate vocals before transcription. | off |
 | `--no-lyrics-prompt` | Don't feed the lyrics to Whisper as a decoding prompt. | off |
 | `--threshold` | Minimum fuzzy-match score (0–100) to accept a word alignment. | 55 |
+| `--server` | Transcribe on a remote syncalong server instead of locally; falls back to `$SYNCALONG_SERVER`. | local |
+| `--token` | Bearer token for the remote server; falls back to `$SYNCALONG_TOKEN`. | none |
 
 ### Lyrics file format
 
@@ -222,6 +247,7 @@ Full guides and the auto-generated API reference live at
 - [CLI guide](https://syncalong.readthedocs.io/en/latest/cli/)
 - [Library guide](https://syncalong.readthedocs.io/en/latest/library/)
 - [How it works](https://syncalong.readthedocs.io/en/latest/how-it-works/)
+- [Remote transcription (server/client)](https://syncalong.readthedocs.io/en/latest/remote/)
 - [API reference](https://syncalong.readthedocs.io/en/latest/reference/)
 
 ## Contributing

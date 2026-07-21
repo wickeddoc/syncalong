@@ -251,8 +251,20 @@ class TestTranscriber:
             def __init__(self, model_name="base", *, model=None):
                 captured["model_name"] = model_name
 
-            def transcribe(self, audio_path, *, language=None, initial_prompt=None):
-                captured["args"] = (audio_path, language, initial_prompt)
+            def transcribe(
+                self,
+                audio_path,
+                *,
+                language=None,
+                initial_prompt=None,
+                separate_vocals=False,
+            ):
+                captured["args"] = (
+                    audio_path,
+                    language,
+                    initial_prompt,
+                    separate_vocals,
+                )
                 return [WordTimestamp("hi", "hi", 0.0, 0.5)]
 
         monkeypatch.setattr(tr, "Transcriber", FakeTranscriber)
@@ -260,8 +272,75 @@ class TestTranscriber:
             Path("s.mp3"), model_name="small", language="de", initial_prompt="x"
         )
         assert captured["model_name"] == "small"
-        assert captured["args"] == (Path("s.mp3"), "de", "x")
+        assert captured["args"] == (Path("s.mp3"), "de", "x", False)
         assert words[0].word == "hi"
+
+    def test_device_forwarded_to_load_model(self, monkeypatch):
+        import sys
+        import types
+
+        import syncalong.transcribe as tr
+
+        captured = {}
+        fake = _FakeModel({"segments": []})
+        fake_whisper = types.ModuleType("whisper")
+
+        def load_model(name, device=None):
+            captured["name"] = name
+            captured["device"] = device
+            return fake
+
+        setattr(fake_whisper, "load_model", load_model)  # noqa: B010
+        monkeypatch.setitem(sys.modules, "whisper", fake_whisper)
+        tr.Transcriber("small", device="cuda")
+        assert captured == {"name": "small", "device": "cuda"}
+
+    def test_separate_vocals_missing_demucs_raises(self, monkeypatch):
+        import importlib.util
+
+        monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)
+        tx = Transcriber(model=_FakeModel({"segments": []}))
+        with pytest.raises(ModuleNotFoundError):
+            tx.transcribe(Path("song.mp3"), separate_vocals=True)
+
+    def test_separate_vocals_runs_demucs_then_transcribes(self, monkeypatch):
+        import importlib.util
+
+        import syncalong.transcribe as tr
+
+        monkeypatch.setattr(
+            importlib.util, "find_spec", lambda name: object()
+        )  # pretend demucs is installed
+        fake_vs = __import__("types").ModuleType("syncalong.vocal_separator")
+        setattr(fake_vs, "separate", lambda p: Path("/tmp/vocals.wav"))  # noqa: B010
+        monkeypatch.setitem(
+            __import__("sys").modules, "syncalong.vocal_separator", fake_vs
+        )
+        fake = _FakeModel({"segments": []})
+        tx = tr.Transcriber(model=fake)
+        tx.transcribe(Path("song.mp3"), separate_vocals=True)
+        assert fake.calls[0][0] == "/tmp/vocals.wav"  # transcribed the vocals path
+
+
+# ---------------------------------------------------------------------------
+# WordTimestamp wire (de)serialization
+# ---------------------------------------------------------------------------
+
+
+class TestWordTimestampWire:
+    def test_to_dict_shape(self):
+        w = WordTimestamp(word="hi", raw="Hi", start=1.0, end=1.5)
+        assert w.to_dict() == {"word": "hi", "raw": "Hi", "start": 1.0, "end": 1.5}
+
+    def test_from_dict_rebuilds(self):
+        d = {"word": "hi", "raw": "Hi", "start": "1.0", "end": "1.5"}
+        w = WordTimestamp.from_dict(d)
+        assert w == WordTimestamp(word="hi", raw="Hi", start=1.0, end=1.5)
+        assert isinstance(w.start, float) and isinstance(w.end, float)
+
+    def test_roundtrip(self):
+        w = WordTimestamp(word="x", raw="X", start=0.25, end=0.75)
+        assert WordTimestamp.from_dict(w.to_dict()) == w
 
 
 # ---------------------------------------------------------------------------
@@ -513,6 +592,138 @@ class TestResolveAudioPath:
         assert "vocal-separation" in err
 
 
+class TestCliRemote:
+    def _lyrics_and_audio(self, tmp_path):
+        lyr = tmp_path / "l.txt"
+        lyr.write_text("hello world\ngoodbye moon\n", encoding="utf-8")
+        aud = tmp_path / "a.mp3"
+        aud.write_bytes(b"\x00")
+        return lyr, aud
+
+    def test_server_flag_uses_remote_transcriber(self, tmp_path, monkeypatch):
+        import syncalong.remote as remote
+        from syncalong import cli
+
+        lyr, aud = self._lyrics_and_audio(tmp_path)
+        captured = {}
+
+        class FakeRemote:
+            def __init__(self, base_url, *, token=None, timeout=300.0):
+                captured["base_url"] = base_url
+                captured["token"] = token
+
+            def transcribe(
+                self,
+                audio_path,
+                *,
+                language=None,
+                initial_prompt=None,
+                separate_vocals=False,
+            ):
+                captured["separate_vocals"] = separate_vocals
+                return [
+                    WordTimestamp("hello", "hello", 1.0, 1.5),
+                    WordTimestamp("world", "world", 2.0, 2.5),
+                    WordTimestamp("goodbye", "goodbye", 4.0, 4.5),
+                    WordTimestamp("moon", "moon", 5.0, 5.5),
+                ]
+
+        monkeypatch.setattr(remote, "RemoteTranscriber", FakeRemote)
+        cli.main(
+            [
+                str(lyr),
+                str(aud),
+                "--server",
+                "http://gpu:8000",
+                "--token",
+                "t",
+                "--separate-vocals",
+            ]
+        )
+        assert captured["base_url"] == "http://gpu:8000"
+        assert captured["token"] == "t"
+        assert captured["separate_vocals"] is True
+
+    def test_server_from_env(self, tmp_path, monkeypatch):
+        import syncalong.remote as remote
+        from syncalong import cli
+
+        lyr, aud = self._lyrics_and_audio(tmp_path)
+        captured = {}
+
+        class FakeRemote:
+            def __init__(self, base_url, *, token=None, timeout=300.0):
+                captured["base_url"] = base_url
+
+            def transcribe(self, *a, **k):
+                return [WordTimestamp("hello", "hello", 1.0, 1.5)]
+
+        monkeypatch.setattr(remote, "RemoteTranscriber", FakeRemote)
+        monkeypatch.setenv("SYNCALONG_SERVER", "http://env:9000")
+        cli.main([str(lyr), str(aud)])
+        assert captured["base_url"] == "http://env:9000"
+
+    def test_local_without_whisper_shows_hint(self, tmp_path, monkeypatch, capsys):
+        from syncalong import cli
+
+        lyr, aud = self._lyrics_and_audio(tmp_path)
+        monkeypatch.delenv("SYNCALONG_SERVER", raising=False)
+        monkeypatch.setattr(cli, "_whisper_available", lambda: False)
+        with pytest.raises(SystemExit):
+            cli.main([str(lyr), str(aud)])
+        assert "syncalong[whisper]" in capsys.readouterr().err
+
+
+class TestServeMain:
+    def test_builds_app_and_runs_uvicorn(self, monkeypatch):
+        import uvicorn
+
+        import syncalong.server as server
+        import syncalong.transcribe as tr
+        from syncalong import cli
+
+        recorded = {}
+
+        class FakeTranscriber:
+            def __init__(self, model_name="base", *, device=None):
+                recorded["model"] = model_name
+                recorded["device"] = device
+
+        monkeypatch.setattr(tr, "Transcriber", FakeTranscriber)
+
+        fake_app = object()
+
+        def fake_create_app(transcriber, *, token=None, allow_vocal_separation=True):
+            recorded["token"] = token
+            recorded["allow_sep"] = allow_vocal_separation
+            return fake_app
+
+        monkeypatch.setattr(server, "create_app", fake_create_app)
+
+        def fake_run(app, host=None, port=None):
+            recorded["run"] = (app, host, port)
+
+        monkeypatch.setattr(uvicorn, "run", fake_run)
+
+        cli.serve_main(
+            [
+                "-m",
+                "small",
+                "--host",
+                "0.0.0.0",
+                "--port",
+                "9000",
+                "--token",
+                "sek",
+                "--no-vocal-separation",
+            ]
+        )
+        assert recorded["model"] == "small"
+        assert recorded["token"] == "sek"
+        assert recorded["allow_sep"] is False
+        assert recorded["run"] == (fake_app, "0.0.0.0", 9000)
+
+
 # ---------------------------------------------------------------------------
 # LRC formatting
 # ---------------------------------------------------------------------------
@@ -634,6 +845,26 @@ class TestAlignFacade:
                 separate_vocals=True,
             )
 
+    def test_forwards_separate_vocals_to_transcriber(self):
+        captured = {}
+
+        class RecordingTranscriber:
+            def transcribe(
+                self,
+                audio_path,
+                *,
+                language=None,
+                initial_prompt=None,
+                separate_vocals=False,
+            ):
+                captured["separate_vocals"] = separate_vocals
+                return [WordTimestamp("hello", "hello", 1.0, 1.5)]
+
+        align(
+            "hello\n", "s.mp3", transcriber=RecordingTranscriber(), separate_vocals=True
+        )
+        assert captured["separate_vocals"] is True
+
 
 class TestPublicAPI:
     def test_top_level_exports_present(self):
@@ -644,6 +875,7 @@ class TestPublicAPI:
             "align_to_lrc",
             "AlignmentResult",
             "Transcriber",
+            "RemoteTranscriber",
             "transcribe_audio",
             "WordTimestamp",
             "parse_lyrics",
@@ -666,7 +898,9 @@ class TestPublicAPI:
             [
                 sys.executable,
                 "-c",
-                "import syncalong, sys; assert 'whisper' not in sys.modules",
+                "import syncalong, sys; "
+                "assert 'whisper' not in sys.modules; "
+                "assert 'fastapi' not in sys.modules",
             ],
             check=True,
         )

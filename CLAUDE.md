@@ -6,7 +6,7 @@
 
 ## Architecture
 
-The package lives in `src/syncalong/` with eight modules forming a linear pipeline:
+The package lives in `src/syncalong/` with ten modules forming a linear pipeline:
 
 ```
 audio file ─► transcribe.py ─► align.py ─► formatter.py ─► LRC stdout
@@ -18,6 +18,8 @@ lyrics file ─► lyrics.py ─────────┘
 - `lyrics.py` — Parses a plain-text lyrics file into `LyricLine` dataclasses. Detects section headers like `[Chorus]` and `(Bridge)` as blank lines. Also builds the Whisper `initial_prompt` from the lyric text (`lyrics_prompt()`).
 - `textnorm.py` — Shared `normalize()` (lowercase, strip accents, collapse whitespace; apostrophes deleted so contractions stay one token, other punctuation becomes a word boundary so hyphenated compounds split) used by both `lyrics.py` and `transcribe.py` so the two sides of the aligner normalize identically.
 - `transcribe.py` — The `Transcriber` class loads a Whisper model once (`whisper.load_model()`) and exposes `.transcribe()` (with `word_timestamps=True`, `condition_on_previous_text=False`, and an optional lyrics `initial_prompt`), returning `WordTimestamp` dataclasses. A long-running caller reuses one `Transcriber`; `transcribe_audio()` is a thin one-shot wrapper over it (unchanged API). The heavy whisper import stays lazy inside `Transcriber.__init__` (reached only when no model is injected), so `import syncalong` never pulls in whisper.
+- `remote.py` — stdlib-only `RemoteTranscriber`, same `.transcribe()` interface as `Transcriber`, but uploads audio to a syncalong server over HTTP (`urllib`) and returns the word timestamps it computes. Lets a thin client (no Whisper, no GPU) drive the same `align()` pipeline.
+- `server.py` — FastAPI `create_app` + `/health` + `/transcribe`, model loaded lazily/once. Only imported by `syncalong.cli.serve_main` and the `syncalong-serve` console script (the `server` extra); never imported by the package root, so `import syncalong` never pulls in fastapi.
 - `align.py` — Core algorithm. Needleman–Wunsch-style DP over the flat lyric word list × transcript word list. Uses `rapidfuzz.fuzz.ratio` for fuzzy word scoring (falls back to `difflib`; scores are `functools.cache`d since song vocabularies repeat heavily). Enforces monotonic alignment so repeated sections don't cross-match. Interpolates timestamps linearly for unmatched lines between matched anchors, and extrapolates lines before the first / after the last anchor from the transcript's start and end times. Public API: `align_lyrics_to_transcript()`.
 - `formatter.py` — Converts `list[tuple[LyricLine, float | None]]` to LRC string. Timestamps formatted as `[mm:ss.xx]`.
 - `vocal_separator.py` — Optional module, only imported when `--separate-vocals` is passed. Shells out to `demucs` via subprocess to isolate vocals before transcription. Progress streams to stderr (stdout stays clean for LRC); the temp output dir is removed at process exit via `atexit`.
@@ -29,7 +31,7 @@ lyrics file ─► lyrics.py ─────────┘
 - **Monotonic DP alignment.** The mapping must be order-preserving — word 5 in the lyrics can't match a transcript word that comes before word 4's match. This prevents repeated choruses from collapsing onto the same audio segment.
 - **Fuzzy matching threshold.** Default 55 (configurable via `--threshold`). Below this score, a word pair is treated as non-matching. This tolerates Whisper mishearing ("runnin" vs "running") without accepting garbage matches.
 - **Gap interpolation and edge extrapolation.** If lines A and C are matched but B is not, B gets a linearly interpolated timestamp. Unmatched lines before the first match / after the last are extrapolated using the transcript's start and end as virtual anchors. Untagged lines are dropped by many LRC players, so every sung line should get a timestamp as long as at least one line matched.
-- **Library-first, CLI-preserving.** The package exposes a curated public API (`__init__.py` + `__all__`, 14 names) and ships a `py.typed` marker. A reusable `Transcriber` lets a long-running consumer (e.g. a jukebox) load the Whisper model once; `align()` returns structured per-line timestamps (`AlignmentResult`), not just an LRC blob. The CLI is a thin layer over the same building blocks and its behavior is unchanged.
+- **Library-first, CLI-preserving.** The package exposes a curated public API (`__init__.py` + `__all__`, 15 names) and ships a `py.typed` marker. A reusable `Transcriber` lets a long-running consumer (e.g. a jukebox) load the Whisper model once; `align()` returns structured per-line timestamps (`AlignmentResult`), not just an LRC blob. The CLI is a thin layer over the same building blocks and its behavior is unchanged.
 
 ## Commands
 
@@ -56,6 +58,10 @@ python -m build       # sdist + wheel into ./dist
 # Run the tool
 syncalong lyrics.txt song.mp3
 syncalong lyrics.txt song.wav -m medium --separate-vocals > output.lrc
+
+# Remote transcription: run Whisper on a GPU box, keep the client thin
+syncalong-serve --model medium --host 0.0.0.0 --device cuda   # on the GPU box
+syncalong lyrics.txt song.mp3 --server http://gpu-box:8000 > song.lrc
 ```
 
 ### Library use
@@ -77,19 +83,28 @@ lrc = syncalong.align_to_lrc(Path("lyrics.txt"), "song.mp3", transcriber=tx)
 
 ## Dependencies
 
-Runtime:
+Runtime (core, always installed):
 
-- `openai-whisper` — speech recognition with word-level timestamps
 - `rapidfuzz` — fast fuzzy string matching for the aligner
-- `demucs` (optional, `vocal-separation` extra) — vocal isolation from Meta
+
+`openai-whisper` is **not** a core dependency — it moved to the `whisper`
+extra so a bare `pip install syncalong` stays thin and torch-free. Install it
+locally, or run Whisper on a separate GPU box via the `server` extra and talk
+to it with `RemoteTranscriber`/`--server` (see `remote.py`/`server.py` above).
 
 Optional-dependency groups (`pyproject.toml`):
 
-- `dev` — `pytest`, `ruff`, `black`, `pyright`, `build`, `twine`
+- `whisper` — `openai-whisper` (local transcription; pulls in PyTorch)
+- `server` — `openai-whisper`, `fastapi`, `uvicorn[standard]`,
+  `python-multipart` (the `syncalong-serve` GPU-side server)
+- `vocal-separation` — `demucs` (vocal isolation from Meta)
+- `dev` — `pytest`, `ruff`, `black`, `pyright`, `build`, `twine`, plus
+  `fastapi`/`httpx`/`uvicorn`/`python-multipart` for testing `server.py`
+  torch-free
 - `docs` — `mkdocs-material`, `mkdocstrings[python]`
-- `vocal-separation` — `demucs`
 
-System dependency: `ffmpeg` must be installed for Whisper audio decoding.
+System dependency: `ffmpeg` must be installed wherever Whisper actually runs
+(the local machine with the `whisper` extra, or the `server` box).
 
 ## Release, Packaging & Documentation
 

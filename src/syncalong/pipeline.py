@@ -59,30 +59,6 @@ def _coerce_lyrics(lyrics: object) -> list[LyricLine]:
     )
 
 
-def _separate_vocals(audio_path: Path) -> Path:
-    """Isolate vocals with Demucs, raising a clear error if unavailable.
-
-    Args:
-        audio_path: The mixed audio file.
-
-    Returns:
-        Path to the isolated vocals track.
-
-    Raises:
-        ModuleNotFoundError: If the optional ``demucs`` dependency is missing.
-    """
-    import importlib.util
-
-    if importlib.util.find_spec("demucs") is None:
-        raise ModuleNotFoundError(
-            "separate_vocals=True requires the optional 'demucs' dependency. "
-            "Install it with: pip install syncalong[vocal-separation]"
-        )
-    from syncalong.vocal_separator import separate
-
-    return separate(audio_path)
-
-
 def align(
     lyrics: LyricsInput,
     audio: AudioInput,
@@ -119,15 +95,15 @@ def align(
     lyric_lines = _coerce_lyrics(lyrics)
     audio_path = Path(str(audio))
 
-    if separate_vocals:
-        audio_path = _separate_vocals(audio_path)
-
     if transcriber is None:
         transcriber = Transcriber(model_name)
 
     prompt = lyrics_prompt(lyric_lines) if use_lyrics_prompt else None
     transcript = transcriber.transcribe(
-        audio_path, language=language, initial_prompt=prompt
+        audio_path,
+        language=language,
+        initial_prompt=prompt,
+        separate_vocals=separate_vocals,
     )
 
     timed_lines = align_lyrics_to_transcript(

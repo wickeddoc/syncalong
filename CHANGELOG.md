@@ -6,6 +6,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Remote transcription (server/client).** `syncalong-serve` (FastAPI) runs
+  Whisper on a GPU box; a stdlib-only `RemoteTranscriber` on a thin client
+  uploads audio and aligns locally. New `--server`/`--token` CLI flags
+  (also `$SYNCALONG_SERVER` / `$SYNCALONG_TOKEN`), a `server` optional extra,
+  and optional shared-token auth. Vocal separation runs server-side via the
+  `separate_vocals` request flag.
+
+### Changed
+
+- **BREAKING:** `openai-whisper` moved from a core dependency to the new
+  `whisper` extra. `pip install syncalong` is now thin (torch-free); install
+  `syncalong[whisper]` for local transcription, or `syncalong[server]` to run
+  the server. Existing local CLI use now needs `pip install "syncalong[whisper]"`.
+
 ## [0.1.0] — 2026-07-19
 
 First public release.

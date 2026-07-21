@@ -50,6 +50,8 @@ syncalong lied.txt lied.mp3 -l de
 | `--separate-vocals` | Run Demucs to isolate vocals before transcription. | off |
 | `--no-lyrics-prompt` | Don't feed the lyrics to Whisper as a decoding prompt. | off |
 | `--threshold` | Minimum fuzzy-match score (0–100) to accept a word alignment. | `55` |
+| `--server` | Transcribe on a remote syncalong server instead of locally; falls back to `$SYNCALONG_SERVER`. | local |
+| `--token` | Bearer token for the remote server; falls back to `$SYNCALONG_TOKEN`. | none |
 
 Run `syncalong --help` for the authoritative list.
 

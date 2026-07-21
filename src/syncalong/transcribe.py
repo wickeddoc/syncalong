@@ -25,6 +25,36 @@ class WordTimestamp:
     start: float
     end: float
 
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a JSON-friendly dict for the transcription wire format.
+
+        Returns:
+            A mapping with ``word``, ``raw``, ``start``, and ``end`` keys.
+        """
+        return {
+            "word": self.word,
+            "raw": self.raw,
+            "start": self.start,
+            "end": self.end,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> WordTimestamp:
+        """Rebuild a :class:`WordTimestamp` from its serialized form.
+
+        Args:
+            data: A mapping with ``word``, ``raw``, ``start``, ``end`` keys.
+
+        Returns:
+            The reconstructed :class:`WordTimestamp`.
+        """
+        return cls(
+            word=data["word"],
+            raw=data["raw"],
+            start=float(data["start"]),
+            end=float(data["end"]),
+        )
+
 
 def _build_transcribe_options(
     *,
@@ -85,15 +115,21 @@ class Transcriber:
         model: A preloaded Whisper model object. When given it is used as-is
             and ``model_name`` is not loaded — useful for sharing an
             already-loaded model or injecting a test double.
+        device: Torch device to load the model on (e.g. ``cuda``); ``None``
+            lets Whisper choose. Ignored when ``model`` is provided.
     """
 
-    def __init__(self, model_name: str = "base", *, model: Any = None):
+    def __init__(
+        self, model_name: str = "base", *, model: Any = None, device: str | None = None
+    ):
         """Initialize the transcriber, loading a Whisper model if none is given.
 
         Args:
             model_name: Whisper model size or variant to load when ``model`` is
                 ``None``. See the class docstring for accepted values.
             model: A preloaded Whisper model to use as-is instead of loading one.
+            device: Torch device to load the model on (e.g. ``cuda``); ``None``
+                lets Whisper choose. Ignored when ``model`` is provided.
         """
         injected = model is not None
         if model is None:
@@ -102,7 +138,10 @@ class Transcriber:
             # in CI, hence the ignore.
             import whisper  # type: ignore[import-not-found]
 
-            model = whisper.load_model(model_name)
+            if device is None:
+                model = whisper.load_model(model_name)
+            else:
+                model = whisper.load_model(model_name, device=device)
         self.model_name = None if injected else model_name
         self._model: Any = model
 
@@ -112,6 +151,7 @@ class Transcriber:
         *,
         language: str | None = None,
         initial_prompt: str | None = None,
+        separate_vocals: bool = False,
     ) -> list[WordTimestamp]:
         """Transcribe one audio file into word-level timestamps.
 
@@ -119,15 +159,35 @@ class Transcriber:
             audio_path: Audio file (any format ffmpeg can decode).
             language: BCP-47 language code, or ``None`` to auto-detect.
             initial_prompt: Text to bias the decoder with (e.g. the lyrics).
+            separate_vocals: When ``True``, isolate vocals with Demucs first.
 
         Returns:
             Every recognised word, in order, with start/end times in seconds.
+
+        Raises:
+            ModuleNotFoundError: If ``separate_vocals`` is ``True`` but the
+                optional ``demucs`` dependency is not installed.
         """
+        if separate_vocals:
+            audio_path = self._separate_vocals(Path(audio_path))
         opts = _build_transcribe_options(
             language=language, initial_prompt=initial_prompt
         )
         result = self._model.transcribe(str(audio_path), **opts)
         return _extract_words(result)
+
+    @staticmethod
+    def _separate_vocals(audio_path: Path) -> Path:
+        import importlib.util
+
+        if importlib.util.find_spec("demucs") is None:
+            raise ModuleNotFoundError(
+                "separate_vocals=True requires the optional 'demucs' dependency. "
+                "Install it with: pip install syncalong[vocal-separation]"
+            )
+        from syncalong.vocal_separator import separate
+
+        return separate(audio_path)
 
 
 def transcribe_audio(
@@ -136,6 +196,7 @@ def transcribe_audio(
     model_name: str = "base",
     language: str | None = None,
     initial_prompt: str | None = None,
+    separate_vocals: bool = False,
 ) -> list[WordTimestamp]:
     """Transcribe one audio file, loading the model for this call only.
 
@@ -148,10 +209,14 @@ def transcribe_audio(
         model_name: Whisper model size or variant.
         language: BCP-47 language code, or ``None`` to auto-detect.
         initial_prompt: Text to bias the decoder with (e.g. the lyrics).
+        separate_vocals: When ``True``, isolate vocals with Demucs first.
 
     Returns:
         Ordered word timestamps.
     """
     return Transcriber(model_name).transcribe(
-        audio_path, language=language, initial_prompt=initial_prompt
+        audio_path,
+        language=language,
+        initial_prompt=initial_prompt,
+        separate_vocals=separate_vocals,
     )
