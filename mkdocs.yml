@@ -81,12 +81,14 @@ nav:
   - CLI guide: cli.md
   - Library guide: library.md
   - How it works: how-it-works.md
+  - Benchmarks: benchmarks.md
   - Remote (server/client): remote.md
   - API reference:
       - Overview: reference/index.md
       - syncalong.pipeline: reference/pipeline.md
       - syncalong.transcribe: reference/transcribe.md
       - syncalong.remote: reference/remote.md
+      - syncalong.server: reference/server.md
       - syncalong.lyrics: reference/lyrics.md
       - syncalong.align: reference/align.md
       - syncalong.formatter: reference/formatter.md

@@ -32,6 +32,12 @@ This installs the library and the `syncalong` CLI with a **thin** dependency
 set ([rapidfuzz](https://github.com/rapidfuzz/RapidFuzz) only) — enough to
 parse lyrics, align a transcript, write LRC, and talk to a remote server.
 
+!!! info "New in syncalong 2.0"
+    The thin, torch-free install — and the `whisper` extra needed for local
+    transcription below — arrived in **2.0**. In syncalong 1.x,
+    `pip install syncalong` bundles Whisper and transcribes locally out of the
+    box. Remote transcription (`--server`, `syncalong-serve`) is 2.0+ as well.
+
 ## Local transcription (Whisper)
 
 To transcribe **on this machine**, add the `whisper` extra:

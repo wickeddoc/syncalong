@@ -25,6 +25,15 @@ Two decisions make this robust on music:
   avoids the repetition/hallucination loops Whisper is prone to on songs with
   repeated choruses.
 
+!!! info "This is the only stage that can move off the client"
+    Transcription (Whisper, and optional Demucs) is the sole GPU-heavy step, so
+    it's the one syncalong can offload to a server. With `--server` /
+    [`RemoteTranscriber`](reference/remote.md#syncalong.remote.RemoteTranscriber)
+    the audio is uploaded and the server returns the same `WordTimestamp`
+    records described here. **Every step from normalization onward always runs
+    on the client** — the aligner and formatter never touch the network. See
+    [Remote transcription](remote.md).
+
 ## 2. Normalize
 
 Both the lyrics and the transcript pass through the **same**

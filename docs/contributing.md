@@ -70,6 +70,31 @@ mkdocs serve      # live-reload preview at http://127.0.0.1:8000
 mkdocs build      # render the static site into ./site
 ```
 
+## Documentation versions
+
+The docs on [ReadTheDocs](https://syncalong.readthedocs.io/) build two moving
+versions:
+
+- **`stable`** — the highest semver tag (the current release). It's the
+  **default** version, so the bare docs URL lands here — the docs that match
+  what `pip install syncalong` installs.
+- **`latest`** — `master`, i.e. **unreleased** work; it can show features that
+  aren't on PyPI yet.
+
+Two rules keep this honest:
+
+1. **Releases promote themselves.** Tagging (e.g. `v2.0.0`, see
+   [Releasing](#releasing)) moves `stable` automatically; a brand-new tag may
+   need activating once under RTD → *Versions*.
+2. **Mark version-gated features.** Documenting something that isn't in the
+   current `stable` release? Add a durable "New in X.Y" admonition (see the
+   remote-transcription pages for the pattern), worded as a lasting fact —
+   "available from 2.0 onward", not "not yet released" — so it stays correct
+   after the release ships.
+
+ReadTheDocs' non-stable notification (RTD → *Addons → Notifications*) also warns
+readers when they're viewing `latest` rather than a release.
+
 ## Releasing
 
 Releases are automated and driven entirely by **git tags** (see
