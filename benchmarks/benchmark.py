@@ -22,7 +22,10 @@ from __future__ import annotations
 import argparse
 import gc
 import platform
+import shutil
+import subprocess
 import sys
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -173,6 +176,188 @@ def run_config(
     return res
 
 
+def match_rate(
+    transcriber: Transcriber,
+    audio: Path,
+    lines: list,
+    prompt: str | None,
+) -> tuple[int, int]:
+    """Transcribe audio and return the (matched, total) lyric-line counts.
+
+    Args:
+        transcriber: A loaded transcriber.
+        audio: Audio file to transcribe.
+        lines: Parsed lyric lines.
+        prompt: Whisper initial prompt, or ``None``.
+
+    Returns:
+        ``(matched, total)`` lyric lines.
+    """
+    words = transcriber.transcribe(audio, initial_prompt=prompt)
+    timed = align_lyrics_to_transcript(lines, words)
+    matched = sum(1 for _, ts in timed if ts is not None)
+    return matched, len(timed)
+
+
+def prefetch_demucs(model: str = "htdemucs") -> None:
+    """Download the Demucs model weights (untimed), if not already cached.
+
+    Args:
+        model: Demucs pretrained model name.
+    """
+    try:
+        from demucs.pretrained import get_model
+
+        get_model(model)
+    except Exception as exc:  # optional dependency or offline
+        print(f"note: demucs prefetch skipped: {exc}", file=sys.stderr)
+
+
+def run_separation(
+    audio: Path, device: str
+) -> tuple[float, Path | None, Path, str | None]:
+    """Time one Demucs vocal-separation pass on a device.
+
+    Args:
+        audio: Mixed audio file.
+        device: ``"cpu"`` or ``"cuda"`` (passed to demucs ``-d``).
+
+    Returns:
+        ``(seconds, vocals_path, outdir, error)``. ``vocals_path`` is ``None``
+        and ``error`` is set when the run fails; the caller removes ``outdir``.
+    """
+    outdir = Path(tempfile.mkdtemp(prefix="syncalong_bench_demucs_"))
+    cmd = [
+        sys.executable,
+        "-m",
+        "demucs",
+        "--two-stems",
+        "vocals",
+        "-d",
+        device,
+        "-o",
+        str(outdir),
+        str(audio),
+    ]
+    t0 = time.perf_counter()
+    proc = subprocess.run(
+        cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True
+    )
+    elapsed = time.perf_counter() - t0
+    if proc.returncode != 0:
+        tail = (proc.stderr or "").strip().splitlines()
+        return elapsed, None, outdir, tail[-1] if tail else f"exit {proc.returncode}"
+    vocals = next(iter(outdir.rglob("vocals.wav")), None)
+    if vocals is None:
+        return elapsed, None, outdir, "no vocals.wav produced"
+    return elapsed, vocals, outdir, None
+
+
+def render_separation(
+    sep_rows: list[tuple[str, float | None, str | None]],
+    match_rows: list[tuple[str, tuple[int, int], tuple[int, int]]],
+    duration_s: float,
+) -> str:
+    """Render the vocal-separation benchmark as Markdown.
+
+    Args:
+        sep_rows: ``(device, seconds_or_None, error_or_None)`` per device.
+        match_rows: ``(model, original_counts, vocals_counts)`` per model.
+        duration_s: Audio duration in seconds.
+
+    Returns:
+        A Markdown string.
+    """
+    out = [f"<!-- {line} -->" for line in hardware_lines()]
+    out.append(f"<!-- Audio duration: {duration_s:.1f} s -->")
+    out += ["", "### Separation time", ""]
+    out += ["| Device | Time | Speed | Speedup vs CPU |", "|---|--:|--:|--:|"]
+    cpu_t = next((t for d, t, _ in sep_rows if d == "cpu" and t), None)
+    for device, secs, err in sep_rows:
+        if err or not secs:
+            out.append(f"| {device} | — | — | {err or 'n/a'} |")
+            continue
+        if device == "cpu":
+            speedup = "1×"
+        elif cpu_t:
+            speedup = f"{cpu_t / secs:.1f}×"
+        else:
+            speedup = "—"
+        out.append(
+            f"| {device} | {secs:.1f} s | {duration_s / secs:.1f}×RT | {speedup} |"
+        )
+    if match_rows:
+        out += ["", "### Match rate — original mix vs isolated vocals", ""]
+        out += ["| Model | Original | Vocals-only |", "|---|--:|--:|"]
+        for model, (mo, to), (mv, tv) in match_rows:
+            out.append(f"| `{model}` | {mo}/{to} | {mv}/{tv} |")
+    return "\n".join(out) + "\n"
+
+
+def run_separation_benchmark(
+    audio: Path,
+    lines: list,
+    prompt: str | None,
+    duration_s: float,
+    devices: list[str],
+    models: list[str],
+    markdown: Path | None,
+) -> None:
+    """Benchmark Demucs separation speed and its effect on the match rate.
+
+    Args:
+        audio: Mixed audio file.
+        lines: Parsed lyric lines.
+        prompt: Whisper initial prompt, or ``None``.
+        duration_s: Audio duration in seconds.
+        devices: Devices to time separation on.
+        models: Whisper models for the match-rate comparison.
+        markdown: Optional path to also write the table to.
+    """
+    prefetch_demucs()
+    sep_rows: list[tuple[str, float | None, str | None]] = []
+    outdirs: list[Path] = []
+    vocals: Path | None = None
+    for device in devices:
+        print(f"→ separating on {device} …", file=sys.stderr, flush=True)
+        secs, path, outdir, err = run_separation(audio, device)
+        outdirs.append(outdir)
+        if err:
+            print(f"  FAILED: {err}", file=sys.stderr)
+        else:
+            print(f"  {secs:.1f}s  ({duration_s / secs:.1f}×RT)", file=sys.stderr)
+        sep_rows.append((device, None if err else secs, err))
+        if path is not None and (vocals is None or device == "cuda"):
+            vocals = path
+
+    match_rows: list[tuple[str, tuple[int, int], tuple[int, int]]] = []
+    if vocals is not None:
+        tdevice = "cuda" if torch.cuda.is_available() else "cpu"
+        for model in models:
+            print(f"→ match rate: {model} on {tdevice} …", file=sys.stderr, flush=True)
+            transcriber = Transcriber(model, device=tdevice)
+            original = match_rate(transcriber, audio, lines, prompt)
+            isolated = match_rate(transcriber, vocals, lines, prompt)
+            del transcriber
+            gc.collect()
+            if tdevice == "cuda":
+                torch.cuda.empty_cache()
+            match_rows.append((model, original, isolated))
+            print(
+                f"  original {original[0]}/{original[1]}"
+                f"  vocals {isolated[0]}/{isolated[1]}",
+                file=sys.stderr,
+            )
+
+    table = render_separation(sep_rows, match_rows, duration_s)
+    print(table)
+    if markdown:
+        markdown.write_text(table, encoding="utf-8")
+        print(f"wrote {markdown}", file=sys.stderr)
+    for outdir in outdirs:
+        shutil.rmtree(outdir, ignore_errors=True)
+
+
 def render(results: list[Result], duration_s: float) -> str:
     """Render results as a Markdown table with a hardware/duration header.
 
@@ -218,6 +403,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--no-prefetch", action="store_true", help="Skip untimed weight prefetch."
     )
+    parser.add_argument(
+        "--separation",
+        action="store_true",
+        help="Benchmark Demucs vocal separation instead of the model matrix.",
+    )
     parser.add_argument("--markdown", type=Path, default=None, help="Write table here.")
     args = parser.parse_args(argv)
 
@@ -233,6 +423,12 @@ def main(argv: list[str] | None = None) -> None:
     print(f"Audio: {args.audio.name}  ({duration:.1f} s)", file=sys.stderr)
     for line in hardware_lines():
         print(f"  {line}", file=sys.stderr)
+
+    if args.separation:
+        run_separation_benchmark(
+            args.audio, lines, prompt, duration, devices, args.models, args.markdown
+        )
+        return
 
     if not args.no_prefetch:
         for model in args.models:

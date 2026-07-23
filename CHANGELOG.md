@@ -56,6 +56,13 @@ writes LRC. To make that split possible, Whisper is no longer a core dependency.
   `syncalong[whisper]` for local transcription, or `syncalong[server]` to run
   the server. Existing local CLI use now needs `pip install "syncalong[whisper]"`.
 
+### Fixed
+
+- **Vocal separation on current torch.** The `vocal-separation` extra now pulls
+  in `torchcodec`, which recent torchaudio requires to save Demucs output —
+  without it, `--separate-vocals` failed at write time
+  (`TorchCodec is required for save_with_torchcodec`).
+
 ## [1.0.0] — 2026-07-21
 
 First public release — the initial version published to PyPI.

@@ -71,6 +71,51 @@ A few things worth noting:
   [`Transcriber`](library.md#batch-process-an-album-reuse-the-model) so it's paid
   once, not per song.
 
+## Vocal separation (Demucs)
+
+`--separate-vocals` runs [Demucs](https://github.com/facebookresearch/demucs) to
+isolate the vocal track before transcription. It's a second heavy stage, and like
+Whisper it's far faster on a GPU:
+
+| Device | Separation time | Speed | Speedup vs CPU |
+|---|--:|--:|--:|
+| CPU | 29.5 s | 8.4× realtime | 1× |
+| GPU (CUDA) | 4.5 s | 55.2× realtime | 6.6× |
+
+Isolating vocals took ~30 s on this fast 16-core CPU and 4.5 s on the GPU. On a
+typical laptop CPU, Demucs is much slower — often *several minutes* per track — so
+a GPU (or a [remote server](remote.md)) matters even more for separation than for
+transcription.
+
+### Does separation improve alignment?
+
+Not for this track — every model matched exactly the same lines with and without
+it:
+
+| Model | Original mix | Isolated vocals |
+|---|--:|--:|
+| `tiny` | 33/40 | 33/40 |
+| `base` | 33/40 | 33/40 |
+| `small` | 33/40 | 33/40 |
+| `medium` | 33/40 | 33/40 |
+| `large` | 33/40 | 33/40 |
+| `turbo` | 33/40 | 33/40 |
+
+That 33/40 is *every singable line* — the other 7 are blank/section markers — so
+alignment was already complete on the full mix. The lyrics prompt and fuzzy
+aligner handled the instrumentation without help. Separation earns its cost on
+harder material (dense mixes, buried or heavily-processed vocals) where full-mix
+transcription actually drops lines; it can also tighten *timing precision* even
+when the matched-line count doesn't move, which this coarse count doesn't capture.
+Reach for it when a track aligns poorly — not as a default.
+
+!!! info "Vocal separation needs torchcodec (and ffmpeg)"
+    Demucs saves its output through torchaudio, which on current torch delegates
+    to [torchcodec](https://github.com/pytorch/torchcodec); the `vocal-separation`
+    extra installs it, and ffmpeg must be on `PATH` (the same ffmpeg Whisper
+    needs). Without torchcodec, `--separate-vocals` fails at write time on recent
+    torch.
+
 ## Accuracy note
 
 Across every model and device above, alignment matched the same **33 of 40**

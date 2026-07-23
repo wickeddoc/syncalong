@@ -69,6 +69,13 @@ pip install "syncalong[vocal-separation]"
 
 Then pass `--separate-vocals` (CLI) or `separate_vocals=True` (library).
 
+!!! info "Demucs needs ffmpeg and torchcodec"
+    Demucs decodes and writes audio through
+    [torchcodec](https://github.com/pytorch/torchcodec) (pulled in by this extra)
+    and needs [ffmpeg](https://ffmpeg.org/) on `PATH` — the same ffmpeg Whisper
+    already requires. Separation uses the GPU automatically when one is available;
+    see [Benchmarks](benchmarks.md#vocal-separation-demucs) for CPU-vs-GPU timings.
+
 ## Install for development
 
 Clone the repository and install in editable mode with the `dev` and `docs`

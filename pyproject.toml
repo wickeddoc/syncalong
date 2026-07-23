@@ -51,7 +51,13 @@ server = [
     "uvicorn[standard]>=0.29",
     "python-multipart>=0.0.9",
 ]
-vocal-separation = ["demucs>=4.0"]
+vocal-separation = [
+    "demucs>=4.0",
+    # Demucs writes its stems through torchaudio, which on current torch
+    # delegates audio saving to torchcodec; without it, separation fails at
+    # write time ("TorchCodec is required for save_with_torchcodec").
+    "torchcodec>=0.1",
+]
 docs = [
     "mkdocs-material>=9.5",
     "mkdocstrings[python]>=0.24",
