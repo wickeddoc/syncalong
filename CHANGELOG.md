@@ -6,7 +6,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [2.0.0] — 2026-07-22
+## [2.0.0] — 2026-07-23
 
 The 2.0 release introduces a **client/server architecture**. syncalong's only
 GPU-heavy stage — Whisper transcription (plus optional Demucs) — can now run on
