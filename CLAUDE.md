@@ -97,7 +97,9 @@ Optional-dependency groups (`pyproject.toml`):
 - `whisper` — `openai-whisper` (local transcription; pulls in PyTorch)
 - `server` — `openai-whisper`, `fastapi`, `uvicorn[standard]`,
   `python-multipart` (the `syncalong-serve` GPU-side server)
-- `vocal-separation` — `demucs` (vocal isolation from Meta)
+- `vocal-separation` — `demucs`, `torchcodec` (vocal isolation from Meta;
+  `torchcodec` is Demucs's audio I/O backend on modern torchaudio — separation
+  fails to save without it)
 - `dev` — `pytest`, `ruff`, `black`, `pyright`, `build`, `twine`, plus
   `fastapi`/`httpx`/`uvicorn`/`python-multipart` for testing `server.py`
   torch-free

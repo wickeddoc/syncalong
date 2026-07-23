@@ -15,6 +15,7 @@ type checkers (mypy, pyright) resolve these signatures in your own code.
 | Get just the LRC string | [`align_to_lrc()`](pipeline.md#syncalong.pipeline.align_to_lrc) |
 | Load the Whisper model once and reuse it | [`Transcriber`](transcribe.md#syncalong.transcribe.Transcriber) |
 | Transcribe on a remote GPU server | [`RemoteTranscriber`](remote.md#syncalong.remote.RemoteTranscriber) |
+| Run or embed the transcription server | [`syncalong.server`](server.md) → [`create_app()`](server.md#syncalong.server.create_app) |
 | Parse a lyrics file/text yourself | [`parse_lyrics()`](lyrics.md#syncalong.lyrics.parse_lyrics) / [`parse_lyrics_text()`](lyrics.md#syncalong.lyrics.parse_lyrics_text) |
 | Run the aligner on your own transcript | [`align_lyrics_to_transcript()`](align.md#syncalong.align.align_lyrics_to_transcript) |
 | Render timed lines to LRC | [`format_lrc()`](formatter.md#syncalong.formatter.format_lrc) |
@@ -27,5 +28,10 @@ The complete public surface (`syncalong.__all__`):
 - **Transcription:** `Transcriber`, `RemoteTranscriber`, `transcribe_audio`, `WordTimestamp`
 - **Lyrics:** `parse_lyrics`, `parse_lyrics_text`, `lyrics_prompt`, `LyricLine`
 - **Low-level building blocks:** `align_lyrics_to_transcript`, `format_lrc`, `separate`
+
+The server-side [`syncalong.server`](server.md) module is **not** re-exported
+from the package root — it lives behind the `server` extra so that
+`import syncalong` never pulls in FastAPI. Import it directly
+(`from syncalong.server import create_app`) on the machine running the server.
 
 Use the navigation to browse each module in detail.

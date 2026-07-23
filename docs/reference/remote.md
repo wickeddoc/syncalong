@@ -7,4 +7,7 @@ replacement for
 Whisper on a remote GPU server, so a thin client needs neither Whisper nor a
 GPU. It uses only the Python standard library.
 
+!!! info "New in syncalong 2.0"
+    `RemoteTranscriber` is available from **version 2.0** onward.
+
 ::: syncalong.remote

@@ -50,10 +50,15 @@ syncalong lied.txt lied.mp3 -l de
 | `--separate-vocals` | Run Demucs to isolate vocals before transcription. | off |
 | `--no-lyrics-prompt` | Don't feed the lyrics to Whisper as a decoding prompt. | off |
 | `--threshold` | Minimum fuzzy-match score (0–100) to accept a word alignment. | `55` |
-| `--server` | Transcribe on a remote syncalong server instead of locally; falls back to `$SYNCALONG_SERVER`. | local |
+| `--server` | Transcribe on a remote syncalong server instead of locally (**new in 2.0**); falls back to `$SYNCALONG_SERVER`. | local |
 | `--token` | Bearer token for the remote server; falls back to `$SYNCALONG_TOKEN`. | none |
 
 Run `syncalong --help` for the authoritative list.
+
+!!! info "Remote mode is new in 2.0"
+    `--server` and `--token` (and the `syncalong-serve` server) are available
+    from **syncalong 2.0** onward; 1.x is local-only. See
+    [Remote transcription](remote.md).
 
 ## Lyrics file format
 
@@ -100,7 +105,8 @@ See [How it works](how-it-works.md) for the details.
 - **Lower/raise `--threshold`** if too few / too many words match. The default
   of 55 tolerates mishearings without accepting garbage.
 - **GPU acceleration** — if PyTorch is installed with CUDA support, Whisper uses
-  the GPU automatically.
+  the GPU automatically. See [Benchmarks](benchmarks.md) for real CPU-vs-GPU
+  timings per model.
 
 ## Exit behavior
 

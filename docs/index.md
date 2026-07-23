@@ -22,6 +22,9 @@ It works two ways from the same pipeline:
 - :material-language-python: **[Library guide](library.md)**
   Embed alignment in your own app; reuse the Whisper model across a whole album.
 
+- :material-server-network: **[Remote (server/client)](remote.md)**
+  Run Whisper on a GPU box; keep a thin, torch-free client for everything else.
+
 - :material-cog: **[How it works](how-it-works.md)**
   The transcribe → normalize → align → format pipeline, explained.
 
@@ -29,6 +32,18 @@ It works two ways from the same pipeline:
   Every public function and dataclass, generated from the docstrings.
 
 </div>
+
+## Local or client/server
+
+!!! info "New in 2.0"
+    The client/server split is available from **syncalong 2.0**; earlier
+    releases (1.x) run the whole pipeline locally.
+
+The only GPU-heavy stage is transcription. You can run the whole pipeline on one
+machine (`pip install "syncalong[whisper]"`), or split it: run `syncalong-serve`
+on a GPU box and drive it from a thin client (`pip install syncalong`) that
+needs neither Whisper nor ffmpeg. Parsing, alignment, and LRC output always run
+on the client. See [Remote transcription](remote.md).
 
 ## Quickstart
 

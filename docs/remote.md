@@ -3,7 +3,13 @@
 syncalong's only GPU-heavy stage is transcription (Whisper, plus optional
 Demucs). You can run that stage on a powerful machine and keep the music,
 lyrics, and the cheap alignment on a low-powered client — e.g. a jukebox with
-all the audio but no GPU.
+all the audio but no GPU. A GPU transcribes 6–37× faster than CPU depending on
+the model — see [Benchmarks](benchmarks.md).
+
+!!! info "New in syncalong 2.0"
+    Remote transcription — the `syncalong-serve` server, `RemoteTranscriber`,
+    and the `--server` CLI flag — is available **from version 2.0 onward**.
+    syncalong 1.x transcribes locally only.
 
 ## Install matrix
 
@@ -72,6 +78,74 @@ alignment stay on the client.
     that prompt is sent to the server. To send **audio only** — zero lyric text
     over the wire — pass `--no-lyrics-prompt` (CLI) or `use_lyrics_prompt=False`
     (library), at some accuracy cost.
+
+## HTTP API
+
+`RemoteTranscriber` is just one client for a small, stable HTTP contract — you
+can drive the server from `curl`, another language, or your own client. The
+server ([`syncalong.server`](reference/server.md)) exposes two endpoints.
+
+### `GET /health`
+
+Liveness probe. Returns the loaded model name (`null` until the model is loaded
+— it loads lazily on the first `/transcribe` unless preloaded by
+`syncalong-serve`). Never requires auth.
+
+```json
+{ "status": "ok", "model": "medium" }
+```
+
+### `POST /transcribe`
+
+`multipart/form-data` upload. Fields:
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `audio` | file | **yes** | The audio file to transcribe. |
+| `language` | text | no | BCP-47 language code; omit to auto-detect. |
+| `initial_prompt` | text | no | Text to bias the decoder (syncalong sends the lyrics prompt here). |
+| `separate_vocals` | text `true`/`false` | no | Isolate vocals with Demucs first (default `false`). |
+
+Send `Authorization: Bearer <token>` when the server is started with a token.
+
+On success (`200`) the body is the transcript — a list of word timestamps plus
+the model that produced them:
+
+```json
+{
+  "words": [
+    { "word": "hello", "raw": "Hello", "start": 12.34, "end": 12.71 }
+  ],
+  "model": "medium"
+}
+```
+
+`word` is the normalized token used for matching; `raw` is Whisper's original
+text; `start`/`end` are seconds. The client rebuilds `WordTimestamp` records
+from this and aligns locally.
+
+Error responses carry a JSON `{"detail": "…"}` body:
+
+| Status | When |
+| --- | --- |
+| `400` | `separate_vocals` requested but disabled (`--no-vocal-separation`) or Demucs isn't installed on the server. |
+| `401` | A token is configured and the request's bearer token is missing or wrong. |
+
+A one-shot `curl` equivalent of the client:
+
+```bash
+curl -sS http://gpu-box:8000/transcribe \
+    -H "Authorization: Bearer $SYNCALONG_TOKEN" \
+    -F "audio=@song.mp3" \
+    -F "language=en" \
+    -F "separate_vocals=false"
+```
+
+!!! tip "Embedding the server"
+    `syncalong.server.create_app(...)` returns the FastAPI app so you can mount
+    it in a larger ASGI application or configure the token, model, device, and
+    vocal-separation policy in code. See the
+    [`syncalong.server` reference](reference/server.md).
 
 ## Auth & exposure
 

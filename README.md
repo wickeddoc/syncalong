@@ -35,6 +35,11 @@ output). Local transcription needs the `whisper` extra:
 `pip install "syncalong[whisper]"`. To transcribe on a separate GPU server
 instead, see [Remote transcription](#remote-transcription-no-local-gpu) below.
 
+> [!NOTE]
+> The thin, torch-free install and remote transcription (`--server`,
+> `syncalong-serve`, `RemoteTranscriber`) are **new in syncalong 2.0**. In 1.x,
+> `pip install syncalong` bundles Whisper and transcribes locally only.
+
 Or from a checkout, in editable / development mode:
 
 ```bash
@@ -54,6 +59,9 @@ This adds [Demucs](https://github.com/facebookresearch/demucs), which
 isolates the vocal track before transcription.
 
 ### Remote transcription (no local GPU)
+
+> [!NOTE]
+> Requires **syncalong 2.0+**. Earlier releases transcribe locally only.
 
 Run Whisper on a GPU machine and keep the audio + lyrics on a thin client:
 
