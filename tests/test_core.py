@@ -313,6 +313,7 @@ class TestTranscriber:
         )  # pretend demucs is installed
         fake_vs = __import__("types").ModuleType("syncalong.vocal_separator")
         setattr(fake_vs, "separate", lambda p: Path("/tmp/vocals.wav"))  # noqa: B010
+        setattr(fake_vs, "cleanup_separation", lambda p: None)  # noqa: B010
         monkeypatch.setitem(
             __import__("sys").modules, "syncalong.vocal_separator", fake_vs
         )
@@ -320,6 +321,42 @@ class TestTranscriber:
         tx = tr.Transcriber(model=fake)
         tx.transcribe(Path("song.mp3"), separate_vocals=True)
         assert fake.calls[0][0] == "/tmp/vocals.wav"  # transcribed the vocals path
+
+    def _fake_vocal_separator(self, monkeypatch, vocals=Path("/tmp/vocals.wav")):
+        """Install a fake vocal_separator module; return its cleanup call log."""
+        import importlib.util
+        import sys
+        import types
+
+        monkeypatch.setattr(
+            importlib.util, "find_spec", lambda name: object()
+        )  # pretend demucs is installed
+        cleaned = []
+        fake_vs = types.ModuleType("syncalong.vocal_separator")
+        setattr(fake_vs, "separate", lambda p: vocals)  # noqa: B010
+        setattr(fake_vs, "cleanup_separation", cleaned.append)  # noqa: B010
+        monkeypatch.setitem(sys.modules, "syncalong.vocal_separator", fake_vs)
+        return cleaned
+
+    def test_separate_vocals_cleans_up_after_transcription(self, monkeypatch):
+        # The server keeps one Transcriber alive for weeks; per-request demucs
+        # output must be reclaimed per call, not left for atexit.
+        cleaned = self._fake_vocal_separator(monkeypatch)
+        tx = Transcriber(model=_FakeModel({"segments": []}))
+        tx.transcribe(Path("song.mp3"), separate_vocals=True)
+        assert cleaned == [Path("/tmp/vocals.wav")]
+
+    def test_separate_vocals_cleans_up_when_transcription_fails(self, monkeypatch):
+        cleaned = self._fake_vocal_separator(monkeypatch)
+
+        class ExplodingModel:
+            def transcribe(self, audio_path, **opts):
+                raise RuntimeError("boom")
+
+        tx = Transcriber(model=ExplodingModel())
+        with pytest.raises(RuntimeError):
+            tx.transcribe(Path("song.mp3"), separate_vocals=True)
+        assert cleaned == [Path("/tmp/vocals.wav")]
 
 
 # ---------------------------------------------------------------------------
@@ -568,6 +605,63 @@ class TestVocalSeparator:
 
         with pytest.raises(RuntimeError):
             vs.separate(Path("song.mp3"))
+
+    def test_cleanup_separation_removes_outdir_immediately(self, monkeypatch):
+        from syncalong import vocal_separator as vs
+
+        registered = []
+        monkeypatch.setattr(
+            vs.atexit,
+            "register",
+            lambda fn, *a, **kw: registered.append((fn, a, kw)),
+        )
+        fake_run, calls = self._fake_run()
+        monkeypatch.setattr(vs.subprocess, "run", fake_run)
+
+        vocals = vs.separate(Path("song.mp3"))
+        cmd, _ = calls[0]
+        outdir = Path(cmd[cmd.index("-o") + 1])
+        assert outdir.is_dir()
+
+        # A long-running caller (the server) must be able to reclaim the
+        # temp dir right after transcription, not at process exit.
+        vs.cleanup_separation(vocals)
+        assert not outdir.exists()
+
+        # The atexit backstop must stay harmless after early cleanup.
+        for fn, a, kw in registered:
+            fn(*a, **kw)
+
+    def test_cleanup_separation_unknown_path_is_noop(self):
+        from syncalong import vocal_separator as vs
+
+        vs.cleanup_separation(Path("/nonexistent/vocals.wav"))
+
+    def test_demucs_failure_cleans_up_outdir(self, monkeypatch):
+        from syncalong import vocal_separator as vs
+
+        monkeypatch.setattr(vs.atexit, "register", lambda *a, **kw: None)
+        fake_run, calls = self._fake_run(returncode=1, make_vocals=False)
+        monkeypatch.setattr(vs.subprocess, "run", fake_run)
+
+        with pytest.raises(RuntimeError):
+            vs.separate(Path("song.mp3"))
+        cmd, _ = calls[0]
+        outdir = Path(cmd[cmd.index("-o") + 1])
+        assert not outdir.exists()
+
+    def test_missing_vocals_output_cleans_up_outdir(self, monkeypatch):
+        from syncalong import vocal_separator as vs
+
+        monkeypatch.setattr(vs.atexit, "register", lambda *a, **kw: None)
+        fake_run, calls = self._fake_run(returncode=0, make_vocals=False)
+        monkeypatch.setattr(vs.subprocess, "run", fake_run)
+
+        with pytest.raises(FileNotFoundError):
+            vs.separate(Path("song.mp3"))
+        cmd, _ = calls[0]
+        outdir = Path(cmd[cmd.index("-o") + 1])
+        assert not outdir.exists()
 
 
 # ---------------------------------------------------------------------------

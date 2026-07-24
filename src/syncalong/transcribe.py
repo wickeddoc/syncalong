@@ -168,13 +168,23 @@ class Transcriber:
             ModuleNotFoundError: If ``separate_vocals`` is ``True`` but the
                 optional ``demucs`` dependency is not installed.
         """
+        separated: Path | None = None
         if separate_vocals:
-            audio_path = self._separate_vocals(Path(audio_path))
-        opts = _build_transcribe_options(
-            language=language, initial_prompt=initial_prompt
-        )
-        result = self._model.transcribe(str(audio_path), **opts)
-        return _extract_words(result)
+            separated = self._separate_vocals(Path(audio_path))
+            audio_path = separated
+        try:
+            opts = _build_transcribe_options(
+                language=language, initial_prompt=initial_prompt
+            )
+            result = self._model.transcribe(str(audio_path), **opts)
+            return _extract_words(result)
+        finally:
+            if separated is not None:
+                # Reclaim the demucs stems now — a long-running caller (the
+                # server, a jukebox) must not wait for the atexit backstop.
+                from syncalong.vocal_separator import cleanup_separation
+
+                cleanup_separation(separated)
 
     @staticmethod
     def _separate_vocals(audio_path: Path) -> Path:
