@@ -6,6 +6,23 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.0.1] — 2026-07-24
+
+### Fixed
+
+- **Memory/disk leak in long-running processes using vocal separation.**
+  Demucs output directories were only removed at process exit (`atexit`), so a
+  long-running `syncalong-serve` (or any long-lived `Transcriber`) leaked the
+  full-length stem WAVs of every `separate_vocals` request — on a tmpfs `/tmp`
+  (RAM-backed, the default on many Linux distributions) this fills **memory**,
+  not disk, and can eventually trigger the kernel OOM killer.
+  `Transcriber.transcribe()` now reclaims the separation directory immediately
+  after transcription (also on failure), failed Demucs runs clean up their
+  output directory right away, and the `atexit` registration remains only as a
+  backstop for one-shot CLI runs and crashes. New
+  `syncalong.vocal_separator.cleanup_separation()` exposes the early cleanup
+  for callers that invoke `separate()` directly.
+
 ## [2.0.0] — 2026-07-23
 
 The 2.0 release introduces a **client/server architecture**. syncalong's only
@@ -88,7 +105,8 @@ First public release — the initial version published to PyPI.
 Initial development tag — never published to PyPI. The feature set above was
 first released publicly as 1.0.0.
 
-[Unreleased]: https://github.com/wickeddoc/syncalong/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/wickeddoc/syncalong/compare/v2.0.1...HEAD
+[2.0.1]: https://github.com/wickeddoc/syncalong/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/wickeddoc/syncalong/compare/v1.0.0...v2.0.0
 [1.0.0]: https://github.com/wickeddoc/syncalong/compare/v0.1.0...v1.0.0
 [0.1.0]: https://github.com/wickeddoc/syncalong/releases/tag/v0.1.0
